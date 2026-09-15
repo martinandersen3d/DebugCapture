@@ -61,6 +61,7 @@ public sealed class DebugCapturePackage : AsyncPackage
         }
 
         var notificationService = new CaptureNotificationService();
+        var featureFlagService = new FeatureFlagService();
         var boundsProvider = new WindowBoundsProvider();
         var screenshotCaptureService = new ScreenshotCaptureService(boundsProvider, this.logger, notificationService);
 
@@ -68,6 +69,7 @@ public sealed class DebugCapturePackage : AsyncPackage
             dte,
             this.JoinableTaskFactory,
             screenshotCaptureService,
+            featureFlagService,
             this.logger);
 
         await this.breakpointCaptureListener.StartAsync(cancellationToken);

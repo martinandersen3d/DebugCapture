@@ -25,12 +25,12 @@ internal sealed class ScreenshotCaptureService : IScreenshotCaptureService
         this.notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
     }
 
-    public Task CaptureAsync(IntPtr windowHandle)
+    public Task CaptureAsync(IntPtr windowHandle, ScreenshotCaptureTrigger trigger)
     {
-        return Task.Run(() => this.CaptureCoreAsync(windowHandle));
+        return Task.Run(() => this.CaptureCoreAsync(windowHandle, trigger));
     }
 
-    private async Task CaptureCoreAsync(IntPtr windowHandle)
+    private async Task CaptureCoreAsync(IntPtr windowHandle, ScreenshotCaptureTrigger trigger)
     {
         try
         {
@@ -40,8 +40,12 @@ internal sealed class ScreenshotCaptureService : IScreenshotCaptureService
                 return;
             }
 
-            var filePath = GetNextFilePath();
-            Directory.CreateDirectory(Path.GetDirectoryName(filePath));
+            var filePath = GetNextFilePath(trigger);
+            var directory = Path.GetDirectoryName(filePath);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
 
             var pngBytes = CapturePngBytes(bounds);
             await WriteFileAsync(filePath, pngBytes).ConfigureAwait(false);
@@ -73,9 +77,9 @@ internal sealed class ScreenshotCaptureService : IScreenshotCaptureService
         await stream.WriteAsync(pngBytes, 0, pngBytes.Length).ConfigureAwait(false);
     }
 
-    private static string GetNextFilePath()
+    private static string GetNextFilePath(ScreenshotCaptureTrigger trigger)
     {
-        return Path.Combine(GetScreenshotDirectory(), GetFileName());
+        return Path.Combine(GetScreenshotDirectory(), GetFileName(trigger));
     }
 
     private static string GetScreenshotDirectory()
@@ -89,12 +93,13 @@ internal sealed class ScreenshotCaptureService : IScreenshotCaptureService
         return Path.Combine(pictures, "VSScreenshots");
     }
 
-    private static string GetFileName()
+    private static string GetFileName(ScreenshotCaptureTrigger trigger)
     {
         return string.Format(
             CultureInfo.InvariantCulture,
-            "VS_Capture_{0:yyyyMMdd_HHmmss_fff}.png",
-            DateTime.Now);
+            "VS_Capture_{0:yyyyMMdd_HHmmss_fff}-{1}.png",
+            DateTime.Now,
+            trigger.GetFileSuffix());
     }
 
     private async Task LogSafelyAsync(Exception exception)
