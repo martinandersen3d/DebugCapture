@@ -8,6 +8,7 @@ internal enum ScreenshotCaptureTrigger
     Step,
     StepIn,
     StepOver,
+    Exception,
 }
 
 internal static class ScreenshotCaptureTriggerExtensions
@@ -20,6 +21,7 @@ internal static class ScreenshotCaptureTriggerExtensions
             ScreenshotCaptureTrigger.Step => "STEP",
             ScreenshotCaptureTrigger.StepIn => "STEP-IN",
             ScreenshotCaptureTrigger.StepOver => "STEP-OVER",
+            ScreenshotCaptureTrigger.Exception => "EXCEPTION",
             _ => throw new ArgumentOutOfRangeException(nameof(trigger), trigger, null),
         };
     }

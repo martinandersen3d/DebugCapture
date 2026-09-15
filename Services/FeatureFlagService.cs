@@ -8,12 +8,15 @@ internal sealed class FeatureFlagService : IFeatureFlagService
 
     public bool IsStepCaptureEnabled { get; private set; } = true;
 
+    public bool IsExceptionCaptureEnabled { get; private set; } = true;
+
     public bool IsEnabled(CaptureFeature feature)
     {
         return feature switch
         {
             CaptureFeature.Breakpoint => this.IsBreakpointCaptureEnabled,
             CaptureFeature.Step => this.IsStepCaptureEnabled,
+            CaptureFeature.Exception => this.IsExceptionCaptureEnabled,
             _ => throw new ArgumentOutOfRangeException(nameof(feature), feature, null),
         };
     }
@@ -27,6 +30,9 @@ internal sealed class FeatureFlagService : IFeatureFlagService
                 break;
             case CaptureFeature.Step:
                 this.IsStepCaptureEnabled = isEnabled;
+                break;
+            case CaptureFeature.Exception:
+                this.IsExceptionCaptureEnabled = isEnabled;
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(feature), feature, null);

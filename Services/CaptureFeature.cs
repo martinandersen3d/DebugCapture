@@ -4,4 +4,5 @@ internal enum CaptureFeature
 {
     Breakpoint,
     Step,
+    Exception,
 }

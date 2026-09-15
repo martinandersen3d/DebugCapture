@@ -141,6 +141,10 @@ internal sealed class DebuggerBreakpointCaptureListener : IDisposable
                 return true;
             case dbgEventReason.dbgEventReasonStep when this.featureFlagService.IsEnabled(CaptureFeature.Step):
                 return this.TryTakeLastStepTrigger(out trigger);
+            case dbgEventReason.dbgEventReasonExceptionThrown when this.featureFlagService.IsEnabled(CaptureFeature.Exception):
+            case dbgEventReason.dbgEventReasonExceptionNotHandled when this.featureFlagService.IsEnabled(CaptureFeature.Exception):
+                trigger = ScreenshotCaptureTrigger.Exception;
+                return true;
             default:
                 trigger = default;
                 return false;
