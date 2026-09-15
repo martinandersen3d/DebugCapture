@@ -5,5 +5,5 @@ namespace DebugCapture.Services;
 
 internal interface IScreenshotCaptureService
 {
-    Task CaptureAsync(IntPtr windowHandle, ScreenshotCaptureTrigger trigger);
+    Task CaptureAsync(IntPtr windowHandle, CaptureFileSet fileSet);
 }

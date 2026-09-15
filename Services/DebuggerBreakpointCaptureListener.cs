@@ -18,7 +18,9 @@ internal sealed class DebuggerBreakpointCaptureListener : IDisposable
 
     private readonly DTE2 dte;
     private readonly JoinableTaskFactory joinableTaskFactory;
+    private readonly ICaptureFilePathProvider captureFilePathProvider;
     private readonly IScreenshotCaptureService screenshotCaptureService;
+    private readonly IDebuggerVariableExportService variableExportService;
     private readonly IFeatureFlagService featureFlagService;
     private readonly IOutputWindowLogger logger;
     private DebuggerEvents? debuggerEvents;
@@ -30,13 +32,17 @@ internal sealed class DebuggerBreakpointCaptureListener : IDisposable
     public DebuggerBreakpointCaptureListener(
         DTE2 dte,
         JoinableTaskFactory joinableTaskFactory,
+        ICaptureFilePathProvider captureFilePathProvider,
         IScreenshotCaptureService screenshotCaptureService,
+        IDebuggerVariableExportService variableExportService,
         IFeatureFlagService featureFlagService,
         IOutputWindowLogger logger)
     {
         this.dte = dte ?? throw new ArgumentNullException(nameof(dte));
         this.joinableTaskFactory = joinableTaskFactory ?? throw new ArgumentNullException(nameof(joinableTaskFactory));
+        this.captureFilePathProvider = captureFilePathProvider ?? throw new ArgumentNullException(nameof(captureFilePathProvider));
         this.screenshotCaptureService = screenshotCaptureService ?? throw new ArgumentNullException(nameof(screenshotCaptureService));
+        this.variableExportService = variableExportService ?? throw new ArgumentNullException(nameof(variableExportService));
         this.featureFlagService = featureFlagService ?? throw new ArgumentNullException(nameof(featureFlagService));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -102,7 +108,11 @@ internal sealed class DebuggerBreakpointCaptureListener : IDisposable
         try
         {
             await this.WaitForDebuggerUiRenderAsync().ConfigureAwait(true);
-            await this.screenshotCaptureService.CaptureAsync(windowHandle, trigger).ConfigureAwait(false);
+            var fileSet = this.captureFilePathProvider.CreateFileSet(trigger);
+            var screenshotTask = this.screenshotCaptureService.CaptureAsync(windowHandle, fileSet);
+            var variablesTask = this.variableExportService.ExportAsync(fileSet);
+
+            await Task.WhenAll(screenshotTask, variablesTask).ConfigureAwait(false);
         }
         catch (Exception exception)
         {

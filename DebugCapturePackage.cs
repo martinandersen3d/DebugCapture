@@ -62,13 +62,17 @@ public sealed class DebugCapturePackage : AsyncPackage
 
         var notificationService = new CaptureNotificationService();
         var featureFlagService = new FeatureFlagService();
+        var captureFilePathProvider = new CaptureFilePathProvider();
         var boundsProvider = new WindowBoundsProvider();
         var screenshotCaptureService = new ScreenshotCaptureService(boundsProvider, this.logger, notificationService);
+        var variableExportService = new DebuggerVariableExportService(dte, this.JoinableTaskFactory, this.logger);
 
         this.breakpointCaptureListener = new DebuggerBreakpointCaptureListener(
             dte,
             this.JoinableTaskFactory,
+            captureFilePathProvider,
             screenshotCaptureService,
+            variableExportService,
             featureFlagService,
             this.logger);
 

@@ -1,7 +1,6 @@
 using System;
 using System.Drawing;
 using System.Drawing.Imaging;
-using System.Globalization;
 using System.IO;
 using System.Threading.Tasks;
 
@@ -25,12 +24,12 @@ internal sealed class ScreenshotCaptureService : IScreenshotCaptureService
         this.notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
     }
 
-    public Task CaptureAsync(IntPtr windowHandle, ScreenshotCaptureTrigger trigger)
+    public Task CaptureAsync(IntPtr windowHandle, CaptureFileSet fileSet)
     {
-        return Task.Run(() => this.CaptureCoreAsync(windowHandle, trigger));
+        return Task.Run(() => this.CaptureCoreAsync(windowHandle, fileSet));
     }
 
-    private async Task CaptureCoreAsync(IntPtr windowHandle, ScreenshotCaptureTrigger trigger)
+    private async Task CaptureCoreAsync(IntPtr windowHandle, CaptureFileSet fileSet)
     {
         try
         {
@@ -40,18 +39,10 @@ internal sealed class ScreenshotCaptureService : IScreenshotCaptureService
                 return;
             }
 
-            var directory = GetScreenshotDirectory();
-            if (!string.IsNullOrWhiteSpace(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
-
-            var filePath = GetNextFilePath(directory, trigger);
-
             var pngBytes = CapturePngBytes(bounds);
-            await WriteFileAsync(filePath, pngBytes).ConfigureAwait(false);
+            await WriteFileAsync(fileSet.ImageFilePath, pngBytes).ConfigureAwait(false);
 
-            this.notificationService.NotifyCaptureCompleted(filePath);
+            this.notificationService.NotifyCaptureCompleted(fileSet.ImageFilePath);
         }
         catch (Exception exception)
         {
@@ -76,44 +67,6 @@ internal sealed class ScreenshotCaptureService : IScreenshotCaptureService
     {
         using var stream = new FileStream(filePath, FileMode.CreateNew, FileAccess.Write, FileShare.Read, FileBufferSize, useAsync: true);
         await stream.WriteAsync(pngBytes, 0, pngBytes.Length).ConfigureAwait(false);
-    }
-
-    private static string GetNextFilePath(string directory, ScreenshotCaptureTrigger trigger)
-    {
-        var timestamp = DateTime.Now;
-        var filePath = Path.Combine(directory, GetFileName(timestamp, trigger));
-
-        for (var counter = 1; File.Exists(filePath); counter++)
-        {
-            filePath = Path.Combine(directory, GetFileName(timestamp, trigger, counter));
-        }
-
-        return filePath;
-    }
-
-    private static string GetScreenshotDirectory()
-    {
-        var pictures = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
-        if (string.IsNullOrWhiteSpace(pictures))
-        {
-            pictures = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Pictures");
-        }
-
-        return Path.Combine(pictures, "VSScreenshots");
-    }
-
-    private static string GetFileName(DateTime timestamp, ScreenshotCaptureTrigger trigger, int? counter = null)
-    {
-        var counterSuffix = counter.HasValue
-            ? string.Format(CultureInfo.InvariantCulture, "_{0:000}", counter.Value)
-            : string.Empty;
-
-        return string.Format(
-            CultureInfo.InvariantCulture,
-            "VS_Capture_{0:yyyyMMdd_HHmmss_fff}-{1}{2}.png",
-            timestamp,
-            trigger.GetFileSuffix(),
-            counterSuffix);
     }
 
     private async Task LogSafelyAsync(Exception exception)
