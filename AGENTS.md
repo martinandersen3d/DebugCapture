@@ -62,3 +62,16 @@ Log internal errors silently to the Visual Studio Output Window (IVsOutputWindow
 - Always refactor code to maintain clarity and readability. and extract methods for repeated logic.
 - avoid god classes and methods. Keep methods focused on a single responsibility.
 - Use inspiration from Mads Kristensen's Visual Studio extension patterns and best practices, to guide your implementation of file structure.
+
+---
+
+# New requirements
+- We need a FeatureFlag, that can toogle features on/off
+
+Also take screenshot on: 
+- breakpoint (like now) - also in featureflag
+- Step-Over / Step-Into Sequences - also in featureflag
+- Exceptions - also in featureflag
+
+New feature:
+-  screenshot Filename will be suffixed with allcaps, example: "-EXCEPTION", "-STEP-IN", "-BREAKPOINT" etc 

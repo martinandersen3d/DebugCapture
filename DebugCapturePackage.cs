@@ -1,4 +1,8 @@
-﻿using Microsoft.VisualStudio.Shell;
+﻿using DebugCapture.Services;
+using EnvDTE;
+using EnvDTE80;
+using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Shell.Interop;
 using System;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -23,6 +27,7 @@ namespace DebugCapture;
 /// </para>
 /// </remarks>
 [PackageRegistration(UseManagedResourcesOnly = true, AllowsBackgroundLoading = true)]
+[ProvideAutoLoad(UIContextGuids80.Debugging, PackageAutoLoadFlags.BackgroundLoad)]
 [Guid(DebugCapturePackage.PackageGuidString)]
 public sealed class DebugCapturePackage : AsyncPackage
 {
@@ -30,6 +35,9 @@ public sealed class DebugCapturePackage : AsyncPackage
     /// DebugCapturePackage GUID string.
     /// </summary>
     public const string PackageGuidString = "522c1f58-2cff-43c4-8f68-96a201f8b4ce";
+
+    private OutputWindowLogger? logger;
+    private DebuggerBreakpointCaptureListener? breakpointCaptureListener;
 
     #region Package Members
 
@@ -42,9 +50,48 @@ public sealed class DebugCapturePackage : AsyncPackage
     /// <returns>A task representing the async work of package initialization, or an already completed task if there is none. Do not return null from this method.</returns>
     protected override async Task InitializeAsync(CancellationToken cancellationToken, IProgress<ServiceProgressData> progress)
     {
-        // When initialized asynchronously, the current thread may be a background thread at this point.
-        // Do any initialization that requires the UI thread after switching to the UI thread.
+        this.logger = new OutputWindowLogger(this);
+        await this.logger.InitializeAsync(cancellationToken);
+
+        var dte = await this.GetDteAsync(cancellationToken);
+        if (dte is null)
+        {
+            await this.logger.LogAsync("DTE service is unavailable; breakpoint capture listener was not started.", cancellationToken);
+            return;
+        }
+
+        var notificationService = new CaptureNotificationService();
+        var boundsProvider = new WindowBoundsProvider();
+        var screenshotCaptureService = new ScreenshotCaptureService(boundsProvider, this.logger, notificationService);
+
+        this.breakpointCaptureListener = new DebuggerBreakpointCaptureListener(
+            dte,
+            this.JoinableTaskFactory,
+            screenshotCaptureService,
+            this.logger);
+
+        await this.breakpointCaptureListener.StartAsync(cancellationToken);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing && this.breakpointCaptureListener is not null)
+        {
+            this.JoinableTaskFactory.Run(async () =>
+            {
+                await this.JoinableTaskFactory.SwitchToMainThreadAsync();
+                this.breakpointCaptureListener.Dispose();
+                this.breakpointCaptureListener = null;
+            });
+        }
+
+        base.Dispose(disposing);
+    }
+
+    private async Task<DTE2?> GetDteAsync(CancellationToken cancellationToken)
+    {
         await this.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+        return await this.GetServiceAsync(typeof(SDTE)).ConfigureAwait(true) as DTE2;
     }
 
     #endregion
