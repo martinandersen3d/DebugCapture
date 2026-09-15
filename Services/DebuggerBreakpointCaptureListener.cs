@@ -6,6 +6,7 @@ using Microsoft.VisualStudio.Threading;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows.Threading;
 
 namespace DebugCapture.Services;
 
@@ -88,19 +89,19 @@ internal sealed class DebuggerBreakpointCaptureListener : IDisposable
             return;
         }
 
-        this.QueueCapture(trigger);
+        this.QueueCapture(this.GetVisualStudioWindowHandle(), trigger);
     }
 
-    private void QueueCapture(ScreenshotCaptureTrigger trigger)
+    private void QueueCapture(IntPtr windowHandle, ScreenshotCaptureTrigger trigger)
     {
-        this.joinableTaskFactory.RunAsync(() => this.CaptureVisualStudioWindowAsync(trigger)).FileAndForget(TelemetryEventName);
+        this.joinableTaskFactory.RunAsync(() => this.CaptureWhenDebuggerUiIsReadyAsync(windowHandle, trigger)).FileAndForget(TelemetryEventName);
     }
 
-    private async Task CaptureVisualStudioWindowAsync(ScreenshotCaptureTrigger trigger)
+    private async Task CaptureWhenDebuggerUiIsReadyAsync(IntPtr windowHandle, ScreenshotCaptureTrigger trigger)
     {
         try
         {
-            var windowHandle = await this.GetVisualStudioWindowHandleAsync().ConfigureAwait(true);
+            await this.WaitForDebuggerUiRenderAsync().ConfigureAwait(true);
             await this.screenshotCaptureService.CaptureAsync(windowHandle, trigger).ConfigureAwait(false);
         }
         catch (Exception exception)
@@ -109,10 +110,14 @@ internal sealed class DebuggerBreakpointCaptureListener : IDisposable
         }
     }
 
-    private async Task<IntPtr> GetVisualStudioWindowHandleAsync()
+    private async Task WaitForDebuggerUiRenderAsync()
     {
         await this.joinableTaskFactory.SwitchToMainThreadAsync();
+        await Dispatcher.CurrentDispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+    }
 
+    private IntPtr GetVisualStudioWindowHandle()
+    {
         var windowHandle = this.dte.MainWindow.HWnd;
         return windowHandle != IntPtr.Zero ? windowHandle : NativeMethods.GetForegroundWindow();
     }
@@ -125,19 +130,24 @@ internal sealed class DebuggerBreakpointCaptureListener : IDisposable
                 trigger = ScreenshotCaptureTrigger.Breakpoint;
                 return true;
             case dbgEventReason.dbgEventReasonStep when this.featureFlagService.IsEnabled(CaptureFeature.Step):
-                trigger = this.TakeLastStepTrigger();
-                return true;
+                return this.TryTakeLastStepTrigger(out trigger);
             default:
                 trigger = default;
                 return false;
         }
     }
 
-    private ScreenshotCaptureTrigger TakeLastStepTrigger()
+    private bool TryTakeLastStepTrigger(out ScreenshotCaptureTrigger trigger)
     {
-        var trigger = this.lastStepTrigger ?? ScreenshotCaptureTrigger.Step;
+        if (!this.lastStepTrigger.HasValue)
+        {
+            trigger = default;
+            return false;
+        }
+
+        trigger = this.lastStepTrigger.Value;
         this.lastStepTrigger = null;
-        return trigger;
+        return true;
     }
 
     private void SubscribeToStepCommand(string commandName, ScreenshotCaptureTrigger trigger, ref CommandEvents? commandEvents)

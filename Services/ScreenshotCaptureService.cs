@@ -40,12 +40,13 @@ internal sealed class ScreenshotCaptureService : IScreenshotCaptureService
                 return;
             }
 
-            var filePath = GetNextFilePath(trigger);
-            var directory = Path.GetDirectoryName(filePath);
+            var directory = GetScreenshotDirectory();
             if (!string.IsNullOrWhiteSpace(directory))
             {
                 Directory.CreateDirectory(directory);
             }
+
+            var filePath = GetNextFilePath(directory, trigger);
 
             var pngBytes = CapturePngBytes(bounds);
             await WriteFileAsync(filePath, pngBytes).ConfigureAwait(false);
@@ -77,9 +78,17 @@ internal sealed class ScreenshotCaptureService : IScreenshotCaptureService
         await stream.WriteAsync(pngBytes, 0, pngBytes.Length).ConfigureAwait(false);
     }
 
-    private static string GetNextFilePath(ScreenshotCaptureTrigger trigger)
+    private static string GetNextFilePath(string directory, ScreenshotCaptureTrigger trigger)
     {
-        return Path.Combine(GetScreenshotDirectory(), GetFileName(trigger));
+        var timestamp = DateTime.Now;
+        var filePath = Path.Combine(directory, GetFileName(timestamp, trigger));
+
+        for (var counter = 1; File.Exists(filePath); counter++)
+        {
+            filePath = Path.Combine(directory, GetFileName(timestamp, trigger, counter));
+        }
+
+        return filePath;
     }
 
     private static string GetScreenshotDirectory()
@@ -93,13 +102,18 @@ internal sealed class ScreenshotCaptureService : IScreenshotCaptureService
         return Path.Combine(pictures, "VSScreenshots");
     }
 
-    private static string GetFileName(ScreenshotCaptureTrigger trigger)
+    private static string GetFileName(DateTime timestamp, ScreenshotCaptureTrigger trigger, int? counter = null)
     {
+        var counterSuffix = counter.HasValue
+            ? string.Format(CultureInfo.InvariantCulture, "_{0:000}", counter.Value)
+            : string.Empty;
+
         return string.Format(
             CultureInfo.InvariantCulture,
-            "VS_Capture_{0:yyyyMMdd_HHmmss_fff}-{1}.png",
-            DateTime.Now,
-            trigger.GetFileSuffix());
+            "VS_Capture_{0:yyyyMMdd_HHmmss_fff}-{1}{2}.png",
+            timestamp,
+            trigger.GetFileSuffix(),
+            counterSuffix);
     }
 
     private async Task LogSafelyAsync(Exception exception)
