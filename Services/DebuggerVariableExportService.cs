@@ -12,6 +12,8 @@ namespace DebugCapture.Services;
 internal sealed class DebuggerVariableExportService : IDebuggerVariableExportService
 {
     private const int FileBufferSize = 81920;
+    private const int ExceptionMemberDepthLimit = 3;
+    private const int ExceptionMemberCountLimit = 100;
 
     private readonly DTE2 dte;
     private readonly JoinableTaskFactory joinableTaskFactory;
@@ -63,6 +65,12 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         AppendSourceLocation(builder, this.dte);
         builder.AppendLine();
 
+        if (fileSet.Trigger == ScreenshotCaptureTrigger.Exception)
+        {
+            AppendExceptionDetails(builder, this.dte.Debugger);
+            builder.AppendLine();
+        }
+
         AppendExpressions(builder, "LOCALS", () => stackFrame.Locals);
         builder.AppendLine();
         AppendExpressions(builder, "AUTOS", () => stackFrame.Arguments);
@@ -76,6 +84,104 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
     {
         builder.AppendLine("File: " + GetActiveDocumentRelativePath(dte));
         builder.AppendLine(string.Format(CultureInfo.InvariantCulture, "Line: {0}", GetActiveDocumentLine(dte)));
+    }
+
+    private static void AppendExceptionDetails(StringBuilder builder, Debugger debugger)
+    {
+        builder.AppendLine("--- EXCEPTION ---");
+
+        try
+        {
+            var exceptionExpression = debugger.GetExpression("$exception", UseAutoExpandRules: true, Timeout: 1000);
+            if (exceptionExpression is null || !exceptionExpression.IsValidValue)
+            {
+                builder.AppendLine("No current exception expression is available.");
+                return;
+            }
+
+            AppendDebuggerExpression(builder, exceptionExpression, 0, new ExceptionMemberCounter());
+            AppendExceptionExpressionValue(builder, debugger, "$exception.GetType().FullName");
+            AppendExceptionExpressionValue(builder, debugger, "$exception.Message");
+            AppendExceptionExpressionValue(builder, debugger, "$exception.Source");
+            AppendExceptionExpressionValue(builder, debugger, "$exception.TargetSite");
+            AppendExceptionExpressionValue(builder, debugger, "$exception.HResult");
+            AppendExceptionExpressionValue(builder, debugger, "$exception.StackTrace");
+            AppendExceptionExpressionValue(builder, debugger, "$exception.InnerException");
+            AppendExceptionExpressionValue(builder, debugger, "$exception.Data");
+            AppendExceptionExpressionValue(builder, debugger, "$exception.ToString()");
+        }
+        catch (Exception exception)
+        {
+            builder.AppendLine("Unable to read exception details: " + exception.Message);
+        }
+    }
+
+    private static void AppendExceptionExpressionValue(StringBuilder builder, Debugger debugger, string expressionText)
+    {
+        try
+        {
+            var expression = debugger.GetExpression(expressionText, UseAutoExpandRules: true, Timeout: 1000);
+            if (expression is null || !expression.IsValidValue)
+            {
+                return;
+            }
+
+            builder.AppendLine(string.Format(
+                CultureInfo.InvariantCulture,
+                "{0} = {1}",
+                expressionText,
+                GetSafeValue(() => expression.Value)));
+        }
+        catch (Exception exception)
+        {
+            builder.AppendLine(string.Format(
+                CultureInfo.InvariantCulture,
+                "{0} = <error: {1}>",
+                expressionText,
+                exception.Message));
+        }
+    }
+
+    private static void AppendDebuggerExpression(StringBuilder builder, Expression expression, int depth, ExceptionMemberCounter counter)
+    {
+        if (depth > ExceptionMemberDepthLimit || counter.Count >= ExceptionMemberCountLimit)
+        {
+            return;
+        }
+
+        counter.Count++;
+        var indent = new string(' ', depth * 2);
+        builder.AppendLine(string.Format(
+            CultureInfo.InvariantCulture,
+            "{0}{1} {2} = {3}",
+            indent,
+            GetSafeValue(() => expression.Type),
+            GetSafeValue(() => expression.Name),
+            GetSafeValue(() => expression.Value)));
+
+        try
+        {
+            var dataMembers = expression.DataMembers;
+            if (dataMembers is null || dataMembers.Count == 0)
+            {
+                return;
+            }
+
+            foreach (Expression member in dataMembers)
+            {
+                if (counter.Count >= ExceptionMemberCountLimit)
+                {
+                    builder.AppendLine(indent + "  ...");
+                    return;
+                }
+
+                AppendDebuggerExpression(builder, member, depth + 1, counter);
+            }
+        }
+        catch (Exception exception)
+        {
+            builder.AppendLine(indent + "Unable to read exception members: " + exception.Message);
+        }
     }
 
     private static void AppendCallStack(StringBuilder builder, StackFrames? stackFrames)
@@ -271,5 +377,10 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         catch
         {
         }
+    }
+
+    private sealed class ExceptionMemberCounter
+    {
+        public int Count { get; set; }
     }
 }
