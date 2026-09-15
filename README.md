@@ -26,6 +26,11 @@ The extension is designed for Visual Studio 2022+ and targets the 64-bit VSSDK.
 > Automatic Dump Locals and Autos when every breakpoint or exception is hit, to a txt file.
 ![Debug Capture text snapshot preview](screenshot2.png)
 
+> Automatic Dump Unhandled Exception details to a txt file.
+
+# Video demo
+![Debug Capture screenshot preview](video.gif)
+
 ## Output files
 
 Each capture creates two matching files in the same directory.
@@ -82,4 +87,3 @@ Run `_list.bat` to browse debugger text snapshots with a preview pane.
 ## SEARCH TAGS:
 - Time Travel Debugging
 - Debugging
-- 
