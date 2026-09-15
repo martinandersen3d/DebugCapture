@@ -1,0 +1,110 @@
+# Debug Capture - Getting Started
+
+Welcome to **Debug Capture**.
+
+Debug Capture records Visual Studio debugging moments by creating a screenshot and a matching debugger text snapshot.
+
+---
+
+## Quick Start
+
+1. Install the VSIX extension.
+2. Restart Visual Studio if prompted.
+3. Open a solution you want to debug.
+4. Start debugging with **F5**.
+5. Hit a breakpoint, step action, or supported exception.
+6. Open `%USERPROFILE%\Pictures\VSScreenshots` to view the generated files.
+
+---
+
+## What Gets Captured
+
+Debug Capture currently records:
+
+- Breakpoints
+- Step Into actions
+- Step Over actions
+- Exceptions when Visual Studio enters break mode and shows the exception helper
+
+Each capture creates two files with the same timestamp and action suffix:
+
+- `.png` screenshot of the Visual Studio IDE window
+- `.txt` debugger snapshot for the same moment
+
+Example output:
+
+```text
+2026-09-15_19-34-20-805_BREAKPOINT.png
+2026-09-15_19-34-20-805_BREAKPOINT.txt
+```
+
+---
+
+## Debugger Text Snapshot
+
+The `.txt` file includes:
+
+- File path relative to the project when possible
+- Current line number
+- Locals values
+- Autos/argument values
+- Call stack entries
+
+If a variable cannot be evaluated, the error is written into the text file instead of interrupting debugging.
+
+---
+
+## Output Folder
+
+Files are saved to:
+
+```text
+%USERPROFILE%\Pictures\VSScreenshots
+```
+
+The folder is created automatically when the first capture is written.
+
+---
+
+## Preview Text Snapshots with FZF
+
+Create `_list.bat` in the screenshot folder:
+
+```bat
+powershell -NoProfile -c ls -Name *.txt | fzf --layout=reverse --preview-window=wrap --preview="type {}"
+```
+
+Run `_list.bat` to browse debugger text snapshots with an interactive preview pane.
+
+---
+
+## Troubleshooting
+
+If no files are created:
+
+1. Confirm the extension is installed and enabled.
+2. Confirm Visual Studio is running a debug session.
+3. Confirm the debugger actually entered break mode.
+4. Check the Visual Studio Output window pane named `DebugCapture`.
+
+Debug Capture avoids showing dialogs during capture, so internal errors are written silently to the Output window.
+
+---
+
+## Build from Source
+
+1. Open `DebugCapture.slnx` in Visual Studio.
+2. Restore NuGet packages if prompted.
+3. Build the project.
+4. Press **F5** to launch the experimental Visual Studio instance.
+5. Debug a sample application and inspect the screenshot output folder.
+
+---
+
+## Notes
+
+The extension keeps UI-thread work minimal.
+
+Screenshot capture, PNG encoding, and file writes run asynchronously off the main Visual Studio UI thread.
+
+Feature flags exist internally for capture types and can be connected to an options page later.
