@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="DebugCapture.csproj">
+    <Deploy />
+  </Project>
+</Solution>
