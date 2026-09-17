@@ -1,3 +1,4 @@
+using DebugCapture.Models;
 using DebugCapture.Interop;
 using EnvDTE;
 using EnvDTE80;
@@ -26,7 +27,7 @@ internal sealed class DebuggerBreakpointCaptureListener : IDisposable
     private DebuggerEvents? debuggerEvents;
     private CommandEvents? stepIntoCommandEvents;
     private CommandEvents? stepOverCommandEvents;
-    private ScreenshotCaptureTrigger? lastStepTrigger;
+    private SnapshotTrigger? lastStepTrigger;
     private bool disposed;
 
     public DebuggerBreakpointCaptureListener(
@@ -54,8 +55,8 @@ internal sealed class DebuggerBreakpointCaptureListener : IDisposable
         this.debuggerEvents = this.dte.Events.DebuggerEvents;
         this.debuggerEvents.OnEnterBreakMode += this.OnEnterBreakMode;
 
-        this.SubscribeToStepCommand(StepIntoCommandName, ScreenshotCaptureTrigger.StepIn, ref this.stepIntoCommandEvents);
-        this.SubscribeToStepCommand(StepOverCommandName, ScreenshotCaptureTrigger.StepOver, ref this.stepOverCommandEvents);
+        this.SubscribeToStepCommand(StepIntoCommandName, SnapshotTrigger.StepIn, ref this.stepIntoCommandEvents);
+        this.SubscribeToStepCommand(StepOverCommandName, SnapshotTrigger.StepOver, ref this.stepOverCommandEvents);
     }
 
     public void Dispose()
@@ -98,12 +99,12 @@ internal sealed class DebuggerBreakpointCaptureListener : IDisposable
         this.QueueCapture(this.GetVisualStudioWindowHandle(), trigger);
     }
 
-    private void QueueCapture(IntPtr windowHandle, ScreenshotCaptureTrigger trigger)
+    private void QueueCapture(IntPtr windowHandle, SnapshotTrigger trigger)
     {
         this.joinableTaskFactory.RunAsync(() => this.CaptureWhenDebuggerUiIsReadyAsync(windowHandle, trigger)).FileAndForget(TelemetryEventName);
     }
 
-    private async Task CaptureWhenDebuggerUiIsReadyAsync(IntPtr windowHandle, ScreenshotCaptureTrigger trigger)
+    private async Task CaptureWhenDebuggerUiIsReadyAsync(IntPtr windowHandle, SnapshotTrigger trigger)
     {
         try
         {
@@ -132,18 +133,18 @@ internal sealed class DebuggerBreakpointCaptureListener : IDisposable
         return windowHandle != IntPtr.Zero ? windowHandle : NativeMethods.GetForegroundWindow();
     }
 
-    private bool TryGetCaptureTrigger(dbgEventReason reason, out ScreenshotCaptureTrigger trigger)
+    private bool TryGetCaptureTrigger(dbgEventReason reason, out SnapshotTrigger trigger)
     {
         switch (reason)
         {
             case dbgEventReason.dbgEventReasonBreakpoint when this.featureFlagService.IsEnabled(CaptureFeature.Breakpoint):
-                trigger = ScreenshotCaptureTrigger.Breakpoint;
+                trigger = SnapshotTrigger.Breakpoint;
                 return true;
             case dbgEventReason.dbgEventReasonStep when this.featureFlagService.IsEnabled(CaptureFeature.Step):
                 return this.TryTakeLastStepTrigger(out trigger);
             case dbgEventReason.dbgEventReasonExceptionThrown when this.featureFlagService.IsEnabled(CaptureFeature.Exception):
             case dbgEventReason.dbgEventReasonExceptionNotHandled when this.featureFlagService.IsEnabled(CaptureFeature.Exception):
-                trigger = ScreenshotCaptureTrigger.Exception;
+                trigger = SnapshotTrigger.Exception;
                 return true;
             default:
                 trigger = default;
@@ -151,7 +152,7 @@ internal sealed class DebuggerBreakpointCaptureListener : IDisposable
         }
     }
 
-    private bool TryTakeLastStepTrigger(out ScreenshotCaptureTrigger trigger)
+    private bool TryTakeLastStepTrigger(out SnapshotTrigger trigger)
     {
         if (!this.lastStepTrigger.HasValue)
         {
@@ -164,12 +165,12 @@ internal sealed class DebuggerBreakpointCaptureListener : IDisposable
         return true;
     }
 
-    private void SubscribeToStepCommand(string commandName, ScreenshotCaptureTrigger trigger, ref CommandEvents? commandEvents)
+    private void SubscribeToStepCommand(string commandName, SnapshotTrigger trigger, ref CommandEvents? commandEvents)
     {
         var command = this.dte.Commands.Item(commandName);
         commandEvents = this.dte.Events.CommandEvents[command.Guid, command.ID];
 
-        if (trigger == ScreenshotCaptureTrigger.StepIn)
+        if (trigger == SnapshotTrigger.StepIn)
         {
             commandEvents.BeforeExecute += this.OnStepIntoBeforeExecute;
         }
@@ -181,12 +182,12 @@ internal sealed class DebuggerBreakpointCaptureListener : IDisposable
 
     private void OnStepIntoBeforeExecute(string guid, int id, object customIn, object customOut, ref bool cancelDefault)
     {
-        this.lastStepTrigger = ScreenshotCaptureTrigger.StepIn;
+        this.lastStepTrigger = SnapshotTrigger.StepIn;
     }
 
     private void OnStepOverBeforeExecute(string guid, int id, object customIn, object customOut, ref bool cancelDefault)
     {
-        this.lastStepTrigger = ScreenshotCaptureTrigger.StepOver;
+        this.lastStepTrigger = SnapshotTrigger.StepOver;
     }
 
     private async Task LogSafelyAsync(Exception exception)

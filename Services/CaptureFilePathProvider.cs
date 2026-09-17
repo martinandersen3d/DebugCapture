@@ -1,31 +1,32 @@
 using System;
 using System.Globalization;
 using System.IO;
+using DebugCapture.Models;
 
 namespace DebugCapture.Services;
 
 internal sealed class CaptureFilePathProvider : ICaptureFilePathProvider
 {
-    public CaptureFileSet CreateFileSet(ScreenshotCaptureTrigger trigger)
+    public CaptureFileSet CreateFileSet(SnapshotTrigger trigger)
     {
         var directory = GetScreenshotDirectory();
         Directory.CreateDirectory(directory);
 
-        var timestamp = DateTime.Now;
+        var timestamp = DateTimeOffset.Now;
         var basePath = GetUniqueBasePath(directory, trigger, timestamp);
 
         return new CaptureFileSet(
             trigger,
             timestamp,
             basePath + ".png",
-            basePath + ".txt");
+            basePath + ".json");
     }
 
-    private static string GetUniqueBasePath(string directory, ScreenshotCaptureTrigger trigger, DateTime timestamp)
+    private static string GetUniqueBasePath(string directory, SnapshotTrigger trigger, DateTimeOffset timestamp)
     {
         var basePath = Path.Combine(directory, GetBaseFileName(trigger, timestamp));
 
-        for (var counter = 1; File.Exists(basePath + ".png") || File.Exists(basePath + ".txt"); counter++)
+        for (var counter = 1; File.Exists(basePath + ".png") || File.Exists(basePath + ".json"); counter++)
         {
             basePath = Path.Combine(directory, GetBaseFileName(trigger, timestamp, counter));
         }
@@ -44,7 +45,7 @@ internal sealed class CaptureFilePathProvider : ICaptureFilePathProvider
         return Path.Combine(pictures, "VSScreenshots");
     }
 
-    private static string GetBaseFileName(ScreenshotCaptureTrigger trigger, DateTime timestamp, int? counter = null)
+    private static string GetBaseFileName(SnapshotTrigger trigger, DateTimeOffset timestamp, int? counter = null)
     {
         var counterSuffix = counter.HasValue
             ? string.Format(CultureInfo.InvariantCulture, "_{0:000}", counter.Value)

@@ -1,7 +1,11 @@
 using EnvDTE;
 using EnvDTE80;
+using DebugCapture.Models;
 using Microsoft.VisualStudio.Threading;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Converters;
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Text;
@@ -12,12 +16,18 @@ namespace DebugCapture.Services;
 internal sealed class DebuggerVariableExportService : IDebuggerVariableExportService
 {
     private const int FileBufferSize = 81920;
-    private const int ExceptionMemberDepthLimit = 3;
-    private const int ExceptionMemberCountLimit = 100;
+    private const int MemberDepthLimit = 3;
+    private const int MemberCountLimit = 100;
 
     private readonly DTE2 dte;
     private readonly JoinableTaskFactory joinableTaskFactory;
     private readonly IOutputWindowLogger logger;
+    private static readonly JsonSerializerSettings JsonSerializerSettings = new()
+    {
+        Formatting = Formatting.Indented,
+        NullValueHandling = NullValueHandling.Ignore,
+        Converters = { new StringEnumConverter() },
+    };
 
     public DebuggerVariableExportService(DTE2 dte, JoinableTaskFactory joinableTaskFactory, IOutputWindowLogger logger)
     {
@@ -35,7 +45,8 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
 
         try
         {
-            var content = await this.BuildSnapshotTextAsync(fileSet).ConfigureAwait(true);
+            var snapshot = await this.BuildSnapshotAsync(fileSet).ConfigureAwait(true);
+            var content = JsonConvert.SerializeObject(snapshot, JsonSerializerSettings);
             await Task.Run(() => WriteFileAsync(fileSet.VariablesFilePath, content)).ConfigureAwait(false);
         }
         catch (Exception exception)
@@ -44,217 +55,248 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         }
     }
 
-    private async Task<string> BuildSnapshotTextAsync(CaptureFileSet fileSet)
+    private async Task<Snapshot> BuildSnapshotAsync(CaptureFileSet fileSet)
     {
         await this.joinableTaskFactory.SwitchToMainThreadAsync();
 
-        var builder = new StringBuilder();
-        builder.AppendLine(string.Format(
-            CultureInfo.InvariantCulture,
-            "=== DEBUGGER SNAPSHOT: {0:yyyy-MM-dd HH:mm:ss.fff} ===",
-            fileSet.Timestamp));
-        builder.AppendLine();
+        var snapshot = new Snapshot
+        {
+            Trigger = fileSet.Trigger,
+            Timestamp = fileSet.Timestamp,
+            ImageFilePath = fileSet.ImageFilePath,
+            SnapshotFilePath = fileSet.VariablesFilePath,
+            FileName = GetActiveDocumentFileName(this.dte),
+            Folder = GetActiveDocumentRelativeFolder(this.dte),
+            LineNumber = GetActiveDocumentLine(this.dte),
+            LineText = GetActiveDocumentLineText(this.dte),
+            Info = BuildSnapshotInfo(this.dte),
+        };
 
         var stackFrame = this.dte.Debugger?.CurrentStackFrame;
         if (stackFrame is null)
         {
-            builder.AppendLine("No current debugger stack frame is available.");
-            return builder.ToString();
+            return snapshot;
         }
 
-        AppendSourceLocation(builder, this.dte);
-        builder.AppendLine();
-
-        if (fileSet.Trigger == ScreenshotCaptureTrigger.Exception)
+        if (fileSet.Trigger == SnapshotTrigger.Exception)
         {
-            AppendExceptionDetails(builder, this.dte.Debugger);
-            builder.AppendLine();
+            snapshot.Exception = BuildException(this.dte.Debugger);
         }
 
-        AppendExpressions(builder, "LOCALS", () => stackFrame.Locals);
-        builder.AppendLine();
-        AppendExpressions(builder, "AUTOS", () => stackFrame.Arguments);
-        builder.AppendLine();
-        AppendCallStack(builder, this.dte.Debugger?.CurrentThread?.StackFrames);
+        snapshot.Locals = BuildExpressionList(() => stackFrame.Locals);
+        snapshot.Autos = BuildExpressionList(() => stackFrame.Arguments);
+        snapshot.CallStack = BuildCallStack(this.dte.Debugger?.CurrentThread?.StackFrames, stackFrame, snapshot);
 
-        return builder.ToString();
+        return snapshot;
     }
 
-    private static void AppendSourceLocation(StringBuilder builder, DTE2 dte)
+    private static SnapshotInfo BuildSnapshotInfo(DTE2 dte)
     {
-        builder.AppendLine("File: " + GetActiveDocumentRelativePath(dte));
-        builder.AppendLine(string.Format(CultureInfo.InvariantCulture, "Line: {0}", GetActiveDocumentLine(dte)));
+        return new SnapshotInfo
+        {
+            ProjectName = GetSafeValue(() => dte.ActiveDocument?.ProjectItem?.ContainingProject?.Name),
+            SolutionName = GetSafeValue(() => Path.GetFileNameWithoutExtension(dte.Solution?.FullName)),
+            ProcessName = GetSafeValue(() => dte.Debugger?.CurrentProcess?.Name),
+            ThreadName = GetSafeValue(() => dte.Debugger?.CurrentThread?.Name),
+        };
     }
 
-    private static void AppendExceptionDetails(StringBuilder builder, Debugger debugger)
+    private static SnapshotException BuildException(Debugger debugger)
     {
-        builder.AppendLine("--- EXCEPTION ---");
-
-        try
-        {
-            var exceptionExpression = debugger.GetExpression("$exception", UseAutoExpandRules: true, Timeout: 1000);
-            if (exceptionExpression is null || !exceptionExpression.IsValidValue)
-            {
-                builder.AppendLine("No current exception expression is available.");
-                return;
-            }
-
-            AppendDebuggerExpression(builder, exceptionExpression, 0, new ExceptionMemberCounter());
-            AppendExceptionExpressionValue(builder, debugger, "$exception.GetType().FullName");
-            AppendExceptionExpressionValue(builder, debugger, "$exception.Message");
-            AppendExceptionExpressionValue(builder, debugger, "$exception.Source");
-            AppendExceptionExpressionValue(builder, debugger, "$exception.TargetSite");
-            AppendExceptionExpressionValue(builder, debugger, "$exception.HResult");
-            AppendExceptionExpressionValue(builder, debugger, "$exception.StackTrace");
-            AppendExceptionExpressionValue(builder, debugger, "$exception.InnerException");
-            AppendExceptionExpressionValue(builder, debugger, "$exception.Data");
-            AppendExceptionExpressionValue(builder, debugger, "$exception.ToString()");
-        }
-        catch (Exception exception)
-        {
-            builder.AppendLine("Unable to read exception details: " + exception.Message);
-        }
+        return BuildException(debugger, "$exception", 0);
     }
 
-    private static void AppendExceptionExpressionValue(StringBuilder builder, Debugger debugger, string expressionText)
+    private static SnapshotException BuildException(Debugger debugger, string expressionText, int depth)
     {
+        var snapshotException = new SnapshotException();
+
         try
         {
             var expression = debugger.GetExpression(expressionText, UseAutoExpandRules: true, Timeout: 1000);
             if (expression is null || !expression.IsValidValue)
             {
-                return;
+                snapshotException.Message = "No current exception expression is available.";
+                return snapshotException;
             }
 
-            builder.AppendLine(string.Format(
-                CultureInfo.InvariantCulture,
-                "{0} = {1}",
-                expressionText,
-                GetSafeValue(() => expression.Value)));
+            snapshotException.TypeName = GetDebuggerExpressionValue(debugger, expressionText + ".GetType().FullName");
+            if (string.IsNullOrWhiteSpace(snapshotException.TypeName))
+            {
+                snapshotException.TypeName = GetSafeValue(() => expression.Type);
+            }
+
+            snapshotException.Message = GetDebuggerExpressionValue(debugger, expressionText + ".Message");
+            if (string.IsNullOrWhiteSpace(snapshotException.Message))
+            {
+                snapshotException.Message = GetSafeValue(() => expression.Value);
+            }
+
+            snapshotException.Source = GetDebuggerExpressionValue(debugger, expressionText + ".Source");
+            snapshotException.TargetSite = GetDebuggerExpressionValue(debugger, expressionText + ".TargetSite");
+            snapshotException.HResult = GetDebuggerExpressionValue(debugger, expressionText + ".HResult");
+            snapshotException.StackTrace = GetDebuggerExpressionValue(debugger, expressionText + ".StackTrace");
+
+            var counter = new SnapshotMemberCounter();
+            snapshotException.Members = BuildExpressionMembers(expression, 0, counter);
+            snapshotException.MembersTruncated = counter.Truncated;
+
+            if (depth < MemberDepthLimit)
+            {
+                var innerException = TryGetExpression(debugger, expressionText + ".InnerException");
+                if (innerException is not null && innerException.IsValidValue && !string.Equals(GetSafeValue(() => innerException.Value), "null", StringComparison.OrdinalIgnoreCase))
+                {
+                    snapshotException.InnerException = BuildException(debugger, expressionText + ".InnerException", depth + 1);
+                }
+            }
         }
         catch (Exception exception)
         {
-            builder.AppendLine(string.Format(
-                CultureInfo.InvariantCulture,
-                "{0} = <error: {1}>",
-                expressionText,
-                exception.Message));
+            snapshotException.Message = "Unable to read exception details: " + exception.Message;
         }
+
+        return snapshotException;
     }
 
-    private static void AppendDebuggerExpression(StringBuilder builder, Expression expression, int depth, ExceptionMemberCounter counter)
+    private static Expression? TryGetExpression(Debugger debugger, string expressionText)
     {
-        if (depth > ExceptionMemberDepthLimit || counter.Count >= ExceptionMemberCountLimit)
-        {
-            return;
-        }
-
-        counter.Count++;
-        var indent = new string(' ', depth * 2);
-        builder.AppendLine(string.Format(
-            CultureInfo.InvariantCulture,
-            "{0}{1} {2} = {3}",
-            indent,
-            GetSafeValue(() => expression.Type),
-            GetSafeValue(() => expression.Name),
-            GetSafeValue(() => expression.Value)));
-
         try
         {
-            var dataMembers = expression.DataMembers;
-            if (dataMembers is null || dataMembers.Count == 0)
-            {
-                return;
-            }
-
-            foreach (Expression member in dataMembers)
-            {
-                if (counter.Count >= ExceptionMemberCountLimit)
-                {
-                    builder.AppendLine(indent + "  ...");
-                    return;
-                }
-
-                AppendDebuggerExpression(builder, member, depth + 1, counter);
-            }
+            return debugger.GetExpression(expressionText, UseAutoExpandRules: true, Timeout: 1000);
         }
-        catch (Exception exception)
+        catch
         {
-            builder.AppendLine(indent + "Unable to read exception members: " + exception.Message);
+            return null;
         }
     }
 
-    private static void AppendCallStack(StringBuilder builder, StackFrames? stackFrames)
+    private static string GetDebuggerExpressionValue(Debugger debugger, string expressionText)
     {
-        builder.AppendLine("--- CALL STACK ---");
+        var expression = TryGetExpression(debugger, expressionText);
+        if (expression is null || !expression.IsValidValue)
+        {
+            return string.Empty;
+        }
 
+        return GetSafeValue(() => expression.Value);
+    }
+
+    private static List<SnapshotCallStackFrame> BuildCallStack(StackFrames? stackFrames, StackFrame currentStackFrame, Snapshot snapshot)
+    {
+        var frames = new List<SnapshotCallStackFrame>();
         if (stackFrames is null || stackFrames.Count == 0)
         {
-            builder.AppendLine("(none)");
-            return;
+            return frames;
         }
 
+        var currentFunctionName = GetSafeValue(() => currentStackFrame.FunctionName);
+        var index = 0;
         foreach (StackFrame frame in stackFrames)
         {
-            AppendStackFrame(builder, frame);
+            var isCurrentFrame = index == 0 || string.Equals(GetSafeValue(() => frame.FunctionName), currentFunctionName, StringComparison.Ordinal);
+            frames.Add(new SnapshotCallStackFrame
+            {
+                FunctionName = GetSafeValue(() => frame.FunctionName),
+                Module = GetSafeValue(() => frame.Module),
+                File = isCurrentFrame ? CombinePath(snapshot.Folder, snapshot.FileName) : string.Empty,
+                Line = isCurrentFrame && snapshot.LineNumber > 0 ? snapshot.LineNumber : null,
+                IsCurrentFrame = isCurrentFrame,
+            });
+
+            index++;
         }
+
+        return frames;
     }
 
-    private static void AppendStackFrame(StringBuilder builder, StackFrame frame)
+    private static List<SnapshotProperty> BuildExpressionList(Func<Expressions> expressionsFactory)
     {
-        try
-        {
-            builder.AppendLine(string.Format(
-                CultureInfo.InvariantCulture,
-                "{0} [{1}]",
-                GetSafeValue(() => frame.FunctionName),
-                GetSafeValue(() => frame.Module)));
-        }
-        catch (Exception exception)
-        {
-            builder.AppendLine("Unable to read stack frame: " + exception.Message);
-        }
-    }
-
-    private static void AppendExpressions(StringBuilder builder, string title, Func<Expressions> expressionsFactory)
-    {
-        builder.AppendLine(string.Format(CultureInfo.InvariantCulture, "--- {0} ---", title));
+        var properties = new List<SnapshotProperty>();
 
         try
         {
             var expressions = expressionsFactory();
             if (expressions is null || expressions.Count == 0)
             {
-                builder.AppendLine("(none)");
-                return;
+                return properties;
             }
 
+            var counter = new SnapshotMemberCounter();
             foreach (Expression expression in expressions)
             {
-                AppendExpression(builder, expression);
+                properties.Add(BuildSnapshotProperty(expression, 0, counter));
             }
         }
         catch (Exception exception)
         {
-            builder.AppendLine("Unable to read section: " + exception.Message);
+            properties.Add(new SnapshotProperty
+            {
+                Name = "Section",
+                Value = "<error: Unable to read section: " + exception.Message + ">",
+            });
         }
+
+        return properties;
     }
 
-    private static void AppendExpression(StringBuilder builder, Expression expression)
+    private static List<SnapshotProperty> BuildExpressionMembers(Expression expression, int depth, SnapshotMemberCounter counter)
     {
+        var children = new List<SnapshotProperty>();
+
         try
         {
-            builder.AppendLine(string.Format(
-                CultureInfo.InvariantCulture,
-                "{0} {1} = {2}",
-                GetSafeValue(() => expression.Type),
-                GetSafeValue(() => expression.Name),
-                GetSafeValue(() => expression.Value)));
+            var dataMembers = expression.DataMembers;
+            if (dataMembers is null || dataMembers.Count == 0)
+            {
+                return children;
+            }
+
+            foreach (Expression member in dataMembers)
+            {
+                if (counter.Count >= MemberCountLimit)
+                {
+                    counter.Truncated = true;
+                    return children;
+                }
+
+                children.Add(BuildSnapshotProperty(member, depth + 1, counter));
+            }
         }
         catch (Exception exception)
         {
-            builder.AppendLine("Unable to read variable: " + exception.Message);
+            children.Add(new SnapshotProperty
+            {
+                Name = "Members",
+                Value = "<error: Unable to read members: " + exception.Message + ">",
+            });
         }
+
+        return children;
+    }
+
+    private static SnapshotProperty BuildSnapshotProperty(Expression expression, int depth, SnapshotMemberCounter counter)
+    {
+        counter.Count++;
+        var property = new SnapshotProperty
+        {
+            Name = GetSafeValue(() => expression.Name),
+            Value = GetSafeValue(() => expression.Value),
+            Type = GetSafeValue(() => expression.Type),
+        };
+
+        if (depth >= MemberDepthLimit)
+        {
+            counter.Truncated = true;
+        }
+        else
+        {
+            var children = BuildExpressionMembers(expression, depth, counter);
+            if (children.Count > 0)
+            {
+                property.Children = children;
+            }
+        }
+
+        return property;
     }
 
     private static string GetSafeValue(Func<string> valueFactory)
@@ -269,11 +311,25 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         }
     }
 
-    private static string GetActiveDocumentRelativePath(DTE2 dte)
+    private static string GetActiveDocumentRelativeFolder(DTE2 dte)
     {
         try
         {
-            return GetRelativeFilePath(dte.ActiveDocument?.FullName, dte.Solution?.Projects);
+            var fullName = dte.ActiveDocument?.FullName;
+            return string.IsNullOrWhiteSpace(fullName) ? string.Empty : Path.GetDirectoryName(fullName) ?? string.Empty;
+        }
+        catch (Exception exception)
+        {
+            return "<error: " + exception.Message + ">";
+        }
+    }
+
+    private static string GetActiveDocumentFileName(DTE2 dte)
+    {
+        try
+        {
+            var fullName = dte.ActiveDocument?.FullName;
+            return string.IsNullOrWhiteSpace(fullName) ? string.Empty : Path.GetFileName(fullName);
         }
         catch (Exception exception)
         {
@@ -295,70 +351,32 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         }
     }
 
-    private static string GetRelativeFilePath(string? filePath, Projects? projects)
-    {
-        if (string.IsNullOrWhiteSpace(filePath))
-        {
-            return string.Empty;
-        }
-
-        var projectDirectory = GetContainingProjectDirectory(filePath, projects);
-        return string.IsNullOrWhiteSpace(projectDirectory)
-            ? filePath
-            : MakeRelativePath(projectDirectory, filePath);
-    }
-
-    private static string? GetContainingProjectDirectory(string filePath, Projects? projects)
-    {
-        if (projects is null)
-        {
-            return null;
-        }
-
-        string? bestMatch = null;
-        foreach (Project project in projects)
-        {
-            var projectDirectory = GetProjectDirectory(project);
-            if (string.IsNullOrWhiteSpace(projectDirectory) || !IsPathInsideDirectory(filePath, projectDirectory))
-            {
-                continue;
-            }
-
-            if (bestMatch is null || projectDirectory.Length > bestMatch.Length)
-            {
-                bestMatch = projectDirectory;
-            }
-        }
-
-        return bestMatch;
-    }
-
-    private static string? GetProjectDirectory(Project project)
+    private static string GetActiveDocumentLineText(DTE2 dte)
     {
         try
         {
-            return string.IsNullOrWhiteSpace(project.FullName)
-                ? null
-                : Path.GetDirectoryName(project.FullName);
+            if (dte.ActiveDocument?.Object("TextDocument") is not TextDocument textDocument ||
+                dte.ActiveDocument.Selection is not TextSelection selection)
+            {
+                return string.Empty;
+            }
+
+            var line = selection.ActivePoint.Line;
+            var endLine = textDocument.EndPoint.Line;
+            var editPoint = textDocument.StartPoint.CreateEditPoint();
+            return line < endLine
+                ? editPoint.GetLines(line, line + 1).TrimEnd('\r', '\n')
+                : editPoint.GetLines(line, line).TrimEnd('\r', '\n');
         }
-        catch
+        catch (Exception exception)
         {
-            return null;
+            return "<error: " + exception.Message + ">";
         }
     }
 
-    private static bool IsPathInsideDirectory(string filePath, string directory)
+    private static string CombinePath(string folder, string fileName)
     {
-        var normalizedFilePath = Path.GetFullPath(filePath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var normalizedDirectory = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        return normalizedFilePath.StartsWith(normalizedDirectory, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string MakeRelativePath(string directory, string filePath)
-    {
-        var directoryUri = new Uri(Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar);
-        var fileUri = new Uri(Path.GetFullPath(filePath));
-        return Uri.UnescapeDataString(directoryUri.MakeRelativeUri(fileUri).ToString()).Replace('/', Path.DirectorySeparatorChar);
+        return string.IsNullOrEmpty(folder) ? fileName : Path.Combine(folder, fileName);
     }
 
     private static async Task WriteFileAsync(string filePath, string content)
@@ -379,8 +397,10 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         }
     }
 
-    private sealed class ExceptionMemberCounter
+    private sealed class SnapshotMemberCounter
     {
         public int Count { get; set; }
+
+        public bool Truncated { get; set; }
     }
 }

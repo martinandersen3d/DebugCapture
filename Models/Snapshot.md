@@ -6,11 +6,12 @@ This document describes the data model used by Debug Capture to represent a sing
 
 ```
 Snapshot
+├── $description        (string)
 ├── SchemaVersion        (int)
 ├── Trigger              (SnapshotTrigger)
 ├── Timestamp            (DateTimeOffset)
-├── Filename             (string)
-├── FilePath             (string)
+├── FileName             (string)
+├── Folder               (string)
 ├── LineNumber           (int)
 ├── LineText             (string)
 ├── Locals               (List<SnapshotProperty>)
@@ -31,11 +32,12 @@ The root object representing everything captured at a single debugger stop.
 
 | Property | Type | Description |
 |---|---|---|
+| `$description` | `string` | Short, fixed description of what this JSON file represents, serialized as the topmost key so an AI agent or unfamiliar reader immediately understands the file's context without prior knowledge of the schema. |
 | `SchemaVersion` | `int` | Version number of the snapshot file format. Defaults to `1`. Allows future consumers (tools, viewers, AI agents) to detect and handle older/newer snapshot shapes without guessing. Increment this whenever a breaking change is made to the model. |
 | `Trigger` | `SnapshotTrigger` | What caused this snapshot to be captured — a breakpoint hit, a step action, or an exception. See [`SnapshotTrigger`](#snapshottrigger-enum) below. |
 | `Timestamp` | `DateTimeOffset` | The moment the snapshot was captured, including local offset information. Used to build the shared filename prefix that pairs the screenshot and snapshot file together and to preserve time-zone context when snapshots are shared. |
-| `Filename` | `string` | Name of the source file the debugger was stopped in (e.g. `Program.cs`). |
-| `FilePath` | `string` | Path to the source file, relative to the containing project when possible (falls back to the full path otherwise). |
+| `FileName` | `string` | Name of the source file the debugger was stopped in (e.g. `Program.cs`). |
+| `Folder` | `string` | Full path to the folder containing the source file. |
 | `LineNumber` | `int` | The line number in the source file where execution was stopped. |
 | `LineText` | `string` | A copy of the literal source text on that line, so a snapshot can be understood without re-opening the original file (useful if the file changes later, or the snapshot is viewed on a different machine). |
 | `Locals` | `List<SnapshotProperty>` | Variables from the debugger's **Locals** window at the time of capture. |
@@ -69,10 +71,8 @@ A single name/value/type entry, used for Locals, Autos, Watches, and exception m
 | Property | Type | Description |
 |---|---|---|
 | `Name` | `string` | The variable or member name (e.g. `i`, `user`, `Message`). |
-| `Value` | `string` | The evaluated value as a string. If evaluation fails, this may be empty or contain the partial value available from the debugger. The structured error message should be stored in `EvaluationError`. |
+| `Value` | `string` | The evaluated value as a string. If evaluation fails, this may contain an `<error: ...>` placeholder rather than throwing, keeping capture fault-tolerant. |
 | `Type` | `string` | The declared or runtime type of the variable/member (e.g. `int`, `User`, `System.String`). |
-| `EvaluationError` | `string` | Error message captured when Visual Studio could not evaluate this property. Separating this from `Value` lets a UI show failed evaluations without parsing text such as `<error: ...>`. |
-| `HasEvaluationError` | `bool` | Computed property that returns `true` when `EvaluationError` is not null, empty, or whitespace. Useful for UI binding and filtering. |
 | `Children` | `List<SnapshotProperty>` | Optional. Populated only when this property represents an expandable/complex object whose members were also captured (e.g. nested object fields). `null` for simple/scalar values. |
 
 ---
@@ -137,7 +137,7 @@ Maps each `SnapshotTrigger` value to the uppercase filename suffix used when nam
 
 ## Design notes
 
-- **Fault tolerance**: Fields sourced from live debugger expression evaluation (`Value`, stack trace details, etc.) should capture failures in `EvaluationError` rather than throwing, consistent with the extension's existing fault-tolerant capture philosophy (see README's "Variable reads are fault tolerant" section).
+- **Fault tolerance**: Fields sourced from live debugger expression evaluation (`Value`, stack trace details, etc.) may contain an `<error: ...>` placeholder instead of throwing, consistent with the extension's existing fault-tolerant capture philosophy (see README's "Variable reads are fault tolerant" section).
 - **Cross-language debugging**: Because captures go through Visual Studio's language-agnostic `EnvDTE`/`Debugger` COM API, most of this model works for any debugger-supported language (C++, Python, etc.), with the exception of a few CLR-only `SnapshotException` fields noted above, which will simply be empty rather than causing failures.
 - **Extensibility**: `SchemaVersion` and the optional/nullable nature of fields like `SnapshotProperty.Children` and `SnapshotCallStackFrame.Line` are intended to let the format evolve without breaking older snapshot files or downstream tooling.
 - **Not yet implemented**: `Watch1`–`Watch4` are reserved in the model but not currently populated by `DebuggerVariableExportService`. A future revision may replace these fixed properties with a dynamic `List<SnapshotWatchWindow>` to support an arbitrary number of named Watch windows.

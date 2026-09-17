@@ -1,6 +1,8 @@
+using DebugCapture.Models;
+
 namespace DebugCapture.Services;
 
 internal interface ICaptureFilePathProvider
 {
-    CaptureFileSet CreateFileSet(ScreenshotCaptureTrigger trigger);
+    CaptureFileSet CreateFileSet(SnapshotTrigger trigger);
 }

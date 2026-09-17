@@ -1,10 +1,18 @@
 ﻿using System;
 using System.Collections.Generic;
+using Newtonsoft.Json;
 
 namespace DebugCapture.Models;
 
 public class Snapshot
 {
+    /// <summary>
+    /// Short, precise description of what this JSON file is, so an AI agent immediately understands the context
+    /// without prior knowledge of the DebugCapture schema.
+    /// </summary>
+    [JsonProperty("$description", Order = -2)]
+    public string Description { get; set; } = "Debugger snapshot captured in Visual Studio at the moment a breakpoint, step, or exception occurred.";
+
     /// <summary>
     /// Schema version of this snapshot file format, for forward/backward compatibility.
     /// </summary>
@@ -14,9 +22,9 @@ public class Snapshot
 
     public DateTimeOffset Timestamp { get; set; }
 
-    public string FilePath { get; set; }
+    public string Folder { get; set; }
 
-    public string Filename { get; set; }
+    public string FileName { get; set; }
 
     public int LineNumber { get; set; }
 
@@ -74,16 +82,6 @@ public class SnapshotProperty
     public string Value { get; set; }
 
     public string Type { get; set; }
-
-    /// <summary>
-    /// Error message captured when Visual Studio could not evaluate this property.
-    /// </summary>
-    public string EvaluationError { get; set; }
-
-    /// <summary>
-    /// True when this property value could not be evaluated successfully.
-    /// </summary>
-    public bool HasEvaluationError => !string.IsNullOrWhiteSpace(this.EvaluationError);
 
     /// <summary>
     /// Nested members, populated only when this property represents an expandable/complex object.
