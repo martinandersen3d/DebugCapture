@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8'>
+    <meta http-equiv='X-UA-Compatible' content='IE=edge'>
+    <title>Page Title</title>
+    <meta name='viewport' content='width=device-width, initial-scale=1'>
+    <script></script>
+    <style>
+        * {padding: 2px;}
+
+    </style>
+</head>
+<body>
+
+<!-- 
+  CONCEPTUAL AGENT INSTRUCTION:
+  - #Snapshot-list-parent: Functions as the master/index view. It displays navigation controls (toolbar) and a scrollable list of available snapshots.
+  - #snapshot-detail-parent: Functions as the inspector/detail view. It presents granular contextual data (Locals, Autos, Watches, Callstack) corresponding to the currently selected item from the snapshot list.
+  - Interactivity: Selecting a item in #Snapshot-list should update the state and populate #snapshot-detail-parent with the relevant context data.
+  - Layout Orientation: [Snapshot List, Snapshot Detail] The outer container toggles dynamically between horizontal (side-by-side master-detail) and vertical (top-and-bottom stacked) layouts depending on available screen space or user preference
+-->
+
+<div>
+    <!-- Snapshot List -->
+     <div id="Snapshot-list-parent" style="border: 1px solid;">
+        <div id="snapshot-list-toolbar" style="display: grid; grid-template-columns: 48px 48px 48px 48px 1fr 48px; gap: 8px;">
+            <button type="button" id="first-snapshot">┃◀</button>
+            <button type="button" id="previous-snapshot">◀</button>
+            <button type="button" id="next-snapshot"> ▶ </button>
+            <button type="button" id="last-snapshot">▶┃</button>
+            
+            <div style="display: block; align-items: center; gap: 12px; font-family: sans-serif;">
+              <label for="volume">Snapshot Number:</label>
+              <input 
+                type="range" 
+                id="volume" 
+                name="volume" 
+                min="0" 
+                max="100" 
+                value="50" 
+                step="1"
+                style="accent-color: #007bff; cursor: pointer;"
+                oninput="document.getElementById('rangeDisplayValue').textContent = this.value"
+              />
+              <span id="rangeDisplayValue">50</span>
+            </div>
+            
+            <button type="button" id="refresh-folder">⟳</button>
+        </div>
+
+        <div id='Snapshot-list' style=" scrollbar-width: thin;">
+            <div style="display: grid; grid-template-columns: 24px 24px 24px 1fr 100px 100px; gap: 8px;">
+                <div><input type="checkbox" title="Select"></input></div>
+                <div><button type="button" title="Go to Source Code">◎</button></div>
+                <div><button type="button" title="Windows Explorer: Select Snapshot File">🗁</button></div>
+                <div title="Click to see Snapshot Detail">MyProgram.cs:L34</div>
+                <div>BREAKPOINT</div>
+                <div>23:58:59</div>
+            </div>
+            <div style="display: grid; grid-template-columns: 24px 24px 24px 1fr 100px 100px; gap: 8px;">
+                <div><input type="checkbox" title="Select"></input></div>
+                <div><button type="button" title="Go to Source Code">◎</button></div>
+                <div><button type="button" title="Windows Explorer: Select Snapshot File">🗁</button></div>
+                <div title="Click to see Snapshot Detail">MyProgram.cs:L36</div>
+                <div>EXCEPTION</div>
+                <div>23:59:59</div>
+            </div>
+        </div>
+     </div>
+    <!-- Snapshot Detail -->
+     <div id="snapshot-detail-parent" style="border: 1px solid; scrollbar-width: thin;">
+        <!-- Locals -->
+        <details>
+          <summary>Locals</summary>
+            <!-- Table: Name, Value, Type -->
+            <table>
+                <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Value</th>
+                    <th>Type</th>
+                </tr>
+                </thead>
+                <tbody>
+                <tr>
+                    <td><code>orderId</code></td>
+                    <td><code>1001</code></td>
+                    <td><code>int</code></td>
+                </tr>
+                <tr>
+                    <td><code>customer</code></td>
+                    <td><code>{MyApp.Models.Customer}</code></td>
+                    <td><code>MyApp.Models.Customer</code></td>
+                </tr>
+                </tbody>
+            </table>             
+        </details>
+         <!-- Autos -->
+        <details>
+          <summary>Autos</summary>
+            <!-- Table: Name, Value, Type -->
+            <table>
+                <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Value</th>
+                    <th>Type</th>
+                </tr>
+                </thead>
+                <tbody>
+                <tr>
+                    <td><code>orderId</code></td>
+                    <td><code>1001</code></td>
+                    <td><code>int</code></td>
+                </tr>
+                <tr>
+                    <td><code>customer</code></td>
+                    <td><code>{MyApp.Models.Customer}</code></td>
+                    <td><code>MyApp.Models.Customer</code></td>
+                </tr>
+                </tbody>
+            </table>             
+        </details>
+
+        <!-- Watch.. -->
+         <details><summary>Watch 1</summary></details>
+         <details><summary>Watch 2</summary></details>
+         <details><summary>Watch 3</summary></details>
+         <details><summary>Watch 4</summary></details>
+         <details><summary>Exception</summary></details>
+         <details><summary>Callstack</summary></details>
+         
+
+
+     </div>
+</div>
+
+
+</body>
+</html>
