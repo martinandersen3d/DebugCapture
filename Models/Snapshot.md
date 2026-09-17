@@ -8,19 +8,19 @@ This document describes the data model used by Debug Capture to represent a sing
 Snapshot
 ├── SchemaVersion        (int)
 ├── Trigger              (SnapshotTrigger)
-├── Timestamp            (DateTime)
-├── ImageFilePath        (string)
-├── SnapshotFilePath     (string)
+├── Timestamp            (DateTimeOffset)
 ├── Filename             (string)
-├── Filepath             (string)
+├── FilePath             (string)
 ├── LineNumber           (int)
 ├── LineText             (string)
-├── Info                 (SnapshotInfo)
 ├── Locals               (List<SnapshotProperty>)
 ├── Autos                (List<SnapshotProperty>)
 ├── Watch1..Watch4       (List<SnapshotProperty>)
 ├── Exception            (SnapshotException)
-└── CallStack            (List<SnapshotCallStackFrame>)
+├── CallStack            (List<SnapshotCallStackFrame>)
+├── Info                 (SnapshotInfo)
+├── ImageFilePath        (string)
+└── SnapshotFilePath     (string)
 ```
 
 ---
@@ -33,19 +33,19 @@ The root object representing everything captured at a single debugger stop.
 |---|---|---|
 | `SchemaVersion` | `int` | Version number of the snapshot file format. Defaults to `1`. Allows future consumers (tools, viewers, AI agents) to detect and handle older/newer snapshot shapes without guessing. Increment this whenever a breaking change is made to the model. |
 | `Trigger` | `SnapshotTrigger` | What caused this snapshot to be captured — a breakpoint hit, a step action, or an exception. See [`SnapshotTrigger`](#snapshottrigger-enum) below. |
-| `Timestamp` | `DateTime` | The moment the snapshot was captured. Used to build the shared filename prefix that pairs the screenshot and snapshot file together. |
-| `ImageFilePath` | `string` | Full path to the paired screenshot (`.png`) file for this snapshot, so a viewer/tool doesn't need to infer pairing purely from filename convention. |
-| `SnapshotFilePath` | `string` | Full path to this snapshot file itself (self-reference), useful once the object is loaded independently of its original file location. |
+| `Timestamp` | `DateTimeOffset` | The moment the snapshot was captured, including local offset information. Used to build the shared filename prefix that pairs the screenshot and snapshot file together and to preserve time-zone context when snapshots are shared. |
 | `Filename` | `string` | Name of the source file the debugger was stopped in (e.g. `Program.cs`). |
-| `Filepath` | `string` | Path to the source file, relative to the containing project when possible (falls back to the full path otherwise). |
+| `FilePath` | `string` | Path to the source file, relative to the containing project when possible (falls back to the full path otherwise). |
 | `LineNumber` | `int` | The line number in the source file where execution was stopped. |
 | `LineText` | `string` | A copy of the literal source text on that line, so a snapshot can be understood without re-opening the original file (useful if the file changes later, or the snapshot is viewed on a different machine). |
-| `Info` | `SnapshotInfo` | Session/environment context (project, solution, process, thread). See [`SnapshotInfo`](#snapshotinfo) below. |
 | `Locals` | `List<SnapshotProperty>` | Variables from the debugger's **Locals** window at the time of capture. |
 | `Autos` | `List<SnapshotProperty>` | Variables from the debugger's **Autos** window (arguments and recently used expressions). |
 | `Watch1`–`Watch4` | `List<SnapshotProperty>` | Snapshots of up to four Watch windows. *(Note: not yet populated by the export service — reserved for future implementation.)* |
 | `Exception` | `SnapshotException` | Populated only when `Trigger == SnapshotTrigger.Exception`. Contains exception details (type, message, stack trace, members). See [`SnapshotException`](#snapshotexception) below. |
 | `CallStack` | `List<SnapshotCallStackFrame>` | The full call stack at the time of capture, ordered from innermost (current) frame outward. |
+| `Info` | `SnapshotInfo` | Session/environment context (project, solution, process, thread). See [`SnapshotInfo`](#snapshotinfo) below. |
+| `ImageFilePath` | `string` | Full path to the paired screenshot (`.png`) file for this snapshot, so a viewer/tool doesn't need to infer pairing purely from filename convention. |
+| `SnapshotFilePath` | `string` | Full path to this snapshot file itself (self-reference), useful once the object is loaded independently of its original file location. |
 
 ---
 
@@ -69,8 +69,10 @@ A single name/value/type entry, used for Locals, Autos, Watches, and exception m
 | Property | Type | Description |
 |---|---|---|
 | `Name` | `string` | The variable or member name (e.g. `i`, `user`, `Message`). |
-| `Value` | `string` | The evaluated value as a string. If evaluation fails, this may contain an `<error: ...>` placeholder rather than throwing, keeping capture fault-tolerant. |
+| `Value` | `string` | The evaluated value as a string. If evaluation fails, this may be empty or contain the partial value available from the debugger. The structured error message should be stored in `EvaluationError`. |
 | `Type` | `string` | The declared or runtime type of the variable/member (e.g. `int`, `User`, `System.String`). |
+| `EvaluationError` | `string` | Error message captured when Visual Studio could not evaluate this property. Separating this from `Value` lets a UI show failed evaluations without parsing text such as `<error: ...>`. |
+| `HasEvaluationError` | `bool` | Computed property that returns `true` when `EvaluationError` is not null, empty, or whitespace. Useful for UI binding and filtering. |
 | `Children` | `List<SnapshotProperty>` | Optional. Populated only when this property represents an expandable/complex object whose members were also captured (e.g. nested object fields). `null` for simple/scalar values. |
 
 ---
@@ -119,7 +121,7 @@ Identifies what caused the capture to happen.
 | `StepOver` | The user performed **Step Over**. |
 | `Exception` | An exception was thrown or went unhandled while the exception helper window was shown. |
 
-### `DebugTriggerExtensions.GetFileSuffix(this SnapshotTrigger trigger)`
+### `SnapshotTriggerExtensions.GetFileSuffix(this SnapshotTrigger trigger)`
 
 Maps each `SnapshotTrigger` value to the uppercase filename suffix used when naming capture files, matching the convention described in the project [README](../README.md):
 
@@ -135,7 +137,7 @@ Maps each `SnapshotTrigger` value to the uppercase filename suffix used when nam
 
 ## Design notes
 
-- **Fault tolerance**: Fields sourced from live debugger expression evaluation (`Value`, stack trace details, etc.) are expected to contain an error placeholder string rather than throwing, consistent with the extension's existing fault-tolerant capture philosophy (see README's "Variable reads are fault tolerant" section).
+- **Fault tolerance**: Fields sourced from live debugger expression evaluation (`Value`, stack trace details, etc.) should capture failures in `EvaluationError` rather than throwing, consistent with the extension's existing fault-tolerant capture philosophy (see README's "Variable reads are fault tolerant" section).
 - **Cross-language debugging**: Because captures go through Visual Studio's language-agnostic `EnvDTE`/`Debugger` COM API, most of this model works for any debugger-supported language (C++, Python, etc.), with the exception of a few CLR-only `SnapshotException` fields noted above, which will simply be empty rather than causing failures.
 - **Extensibility**: `SchemaVersion` and the optional/nullable nature of fields like `SnapshotProperty.Children` and `SnapshotCallStackFrame.Line` are intended to let the format evolve without breaking older snapshot files or downstream tooling.
 - **Not yet implemented**: `Watch1`–`Watch4` are reserved in the model but not currently populated by `DebuggerVariableExportService`. A future revision may replace these fixed properties with a dynamic `List<SnapshotWatchWindow>` to support an arbitrary number of named Watch windows.

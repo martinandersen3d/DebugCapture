@@ -1,8 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace DebugCapture.Models;
 
@@ -15,9 +12,10 @@ public class Snapshot
 
     public SnapshotTrigger Trigger { get; set; }
 
-    public DateTime Timestamp { get; set; }
+    public DateTimeOffset Timestamp { get; set; }
 
-    public string Filepath { get; set; }
+    public string FilePath { get; set; }
+
     public string Filename { get; set; }
 
     public int LineNumber { get; set; }
@@ -78,6 +76,16 @@ public class SnapshotProperty
     public string Type { get; set; }
 
     /// <summary>
+    /// Error message captured when Visual Studio could not evaluate this property.
+    /// </summary>
+    public string EvaluationError { get; set; }
+
+    /// <summary>
+    /// True when this property value could not be evaluated successfully.
+    /// </summary>
+    public bool HasEvaluationError => !string.IsNullOrWhiteSpace(this.EvaluationError);
+
+    /// <summary>
     /// Nested members, populated only when this property represents an expandable/complex object.
     /// </summary>
     public List<SnapshotProperty> Children { get; set; }
@@ -129,7 +137,7 @@ public enum SnapshotTrigger
     Exception,
 }
 
-public static class DebugTriggerExtensions
+public static class SnapshotTriggerExtensions
 {
     public static string GetFileSuffix(this SnapshotTrigger trigger)
     {
