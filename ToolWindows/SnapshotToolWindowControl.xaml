@@ -49,6 +49,7 @@
             <Setter Property="BorderBrush" Value="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowBorderBrushKey}}" />
         </Style>
         <Style TargetType="ListViewItem">
+            <EventSetter Event="ContextMenuOpening" Handler="ListViewItem_ContextMenuOpening" />
             <Setter Property="Background" Value="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowBackgroundBrushKey}}" />
             <Setter Property="Foreground" Value="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}" />
             <Setter Property="BorderBrush" Value="Transparent" />
@@ -97,6 +98,7 @@
             <Setter Property="BorderBrush" Value="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowBorderBrushKey}}" />
         </Style>
         <Style TargetType="TreeViewItem">
+            <EventSetter Event="ContextMenuOpening" Handler="TreeViewItem_ContextMenuOpening" />
             <Setter Property="Background" Value="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowBackgroundBrushKey}}" />
             <Setter Property="Foreground" Value="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}" />
             <Style.Triggers>
@@ -252,7 +254,7 @@
                     <Expander Header="Watch 4">
                         <TreeView ItemsSource="{Binding Watch4}" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" />
                     </Expander>
-                    <Expander Header="Exception">
+                    <Expander Header="Exception" ContextMenuOpening="Exception_ContextMenuOpening">
                         <StackPanel>
                             <TextBlock Text="{Binding SelectedSnapshot.Exception.TypeName, StringFormat=Type: {0}}" FontFamily="Consolas" />
                             <TextBlock Text="{Binding SelectedSnapshot.Exception.Message, StringFormat=Message: {0}}" FontFamily="Consolas" TextWrapping="Wrap" />

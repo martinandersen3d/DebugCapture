@@ -1,4 +1,5 @@
 using DebugCapture.Models;
+using DebugCapture.Services;
 using System;
 using System.Windows;
 using System.Windows.Controls;
@@ -8,6 +9,7 @@ namespace DebugCapture.ToolWindows;
 public partial class SnapshotToolWindowControl : UserControl
 {
     private readonly SnapshotToolWindowViewModel viewModel = new();
+    private readonly SnapshotContextMenuService contextMenuService = new();
     private bool isSynchronizingSelection;
 
     public SnapshotToolWindowControl()
@@ -87,6 +89,42 @@ public partial class SnapshotToolWindowControl : UserControl
         if (this.viewModel.OpenInExplorerCommand.CanExecute(null))
         {
             this.viewModel.OpenInExplorerCommand.Execute(null);
+        }
+    }
+
+    private void ListViewItem_ContextMenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        if (sender is not FrameworkElement element)
+        {
+            return;
+        }
+
+        switch (element.DataContext)
+        {
+            case SnapshotListItem snapshotItem:
+                this.viewModel.SelectSnapshot(snapshotItem);
+                element.ContextMenu = this.contextMenuService.CreateSnapshotContextMenu(snapshotItem);
+                break;
+
+            case SnapshotCallStackFrame frame:
+                element.ContextMenu = this.contextMenuService.CreateCallStackContextMenu(frame, this.viewModel.CallStack);
+                break;
+        }
+    }
+
+    private void TreeViewItem_ContextMenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: SnapshotProperty property } element)
+        {
+            element.ContextMenu = this.contextMenuService.CreatePropertyContextMenu(property);
+        }
+    }
+
+    private void Exception_ContextMenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        if (sender is FrameworkElement element && this.viewModel.SelectedSnapshot is not null)
+        {
+            element.ContextMenu = this.contextMenuService.CreateExceptionContextMenu(this.viewModel.SelectedSnapshot);
         }
     }
 }
