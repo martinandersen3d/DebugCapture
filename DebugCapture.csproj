@@ -4,6 +4,7 @@
     <TargetFramework>net472</TargetFramework>
     <Nullable>enable</Nullable>
     <LangVersion>14</LangVersion>
+    <UseWPF>true</UseWPF>
 
     <!-- VSIX settings -->
     <VSSDKBuildToolsAutoSetup>true</VSSDKBuildToolsAutoSetup>
@@ -24,11 +25,30 @@
     </Content>
   </ItemGroup>
   <ItemGroup>
+    <VSCTCompile Include="DebugCapture.vsct">
+      <ResourceName>Menus.ctmenu</ResourceName>
+    </VSCTCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="System.Design" />
     <PackageReference Include="Microsoft.VisualStudio.SDK" Version="17.14.40265" ExcludeAssets="runtime" />
     <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="18.5.40034" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="Models\NewFolder\" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Update="DebugCapture.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>DebugCapture.vsct</DependentUpon>
+    </Compile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="DebugCapture.vsct">
+      <Generator>VsctGenerator</Generator>
+      <LastGenOutput>DebugCapture.cs</LastGenOutput>
+    </None>
   </ItemGroup>
 </Project>

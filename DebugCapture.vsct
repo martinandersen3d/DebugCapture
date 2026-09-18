@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <Extern href="stdidcmd.h" />
+  <Extern href="vsshlids.h" />
+
+  <Commands package="guidDebugCapturePackage">
+	<Buttons>
+	  <Button guid="guidDebugCaptureCommandSet" id="ShowSnapshotToolWindow" priority="0x0100" type="Button">
+		<Parent guid="guidSHLMainMenu" id="IDG_VS_WNDO_OTRWNDWS1" />
+		<Strings>
+		  <CommandName>Debug Capture Snapshots</CommandName>
+		  <ButtonText>Debug Capture Snapshots</ButtonText>
+		</Strings>
+	  </Button>
+	</Buttons>
+  </Commands>
+
+  <Symbols>
+	<GuidSymbol name="guidDebugCapturePackage" value="{522c1f58-2cff-43c4-8f68-96a201f8b4ce}" />
+	<GuidSymbol name="guidDebugCaptureCommandSet" value="{7aab9f4c-1724-4b2f-96f0-5a559566aa5d}">
+	  <IDSymbol name="ShowSnapshotToolWindow" value="0x0100" />
+	</GuidSymbol>
+  </Symbols>
+</CommandTable>

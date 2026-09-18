@@ -1,4 +1,6 @@
-﻿using DebugCapture.Services;
+﻿using DebugCapture.Commands;
+using DebugCapture.Services;
+using DebugCapture.ToolWindows;
 using EnvDTE;
 using EnvDTE80;
 using Microsoft.VisualStudio.Shell;
@@ -27,7 +29,11 @@ namespace DebugCapture;
 /// </para>
 /// </remarks>
 [PackageRegistration(UseManagedResourcesOnly = true, AllowsBackgroundLoading = true)]
+[ProvideAutoLoad(UIContextGuids80.NoSolution, PackageAutoLoadFlags.BackgroundLoad)]
+[ProvideAutoLoad(UIContextGuids80.SolutionExists, PackageAutoLoadFlags.BackgroundLoad)]
 [ProvideAutoLoad(UIContextGuids80.Debugging, PackageAutoLoadFlags.BackgroundLoad)]
+[ProvideMenuResource("Menus.ctmenu", 1)]
+[ProvideToolWindow(typeof(SnapshotToolWindow), Style = VsDockStyle.Tabbed, Window = EnvDTE.Constants.vsWindowKindOutput)]
 [Guid(DebugCapturePackage.PackageGuidString)]
 public sealed class DebugCapturePackage : AsyncPackage
 {
@@ -50,6 +56,8 @@ public sealed class DebugCapturePackage : AsyncPackage
     /// <returns>A task representing the async work of package initialization, or an already completed task if there is none. Do not return null from this method.</returns>
     protected override async Task InitializeAsync(CancellationToken cancellationToken, IProgress<ServiceProgressData> progress)
     {
+        await ShowSnapshotToolWindowCommand.InitializeAsync(this, cancellationToken);
+
         this.logger = new OutputWindowLogger(this);
         await this.logger.InitializeAsync(cancellationToken);
 
