@@ -6,27 +6,44 @@ using System.Windows.Controls;
 
 namespace DebugCapture.ToolWindows;
 
-public partial class SnapshotToolWindowControl : UserControl
+public partial class SnapshotToolWindowControl : UserControl, IDisposable
 {
     private readonly SnapshotToolWindowViewModel viewModel = new();
     private readonly SnapshotContextMenuService contextMenuService = new();
     private bool isSynchronizingSelection;
+    private bool disposed;
 
     public SnapshotToolWindowControl()
     {
         this.InitializeComponent();
         this.DataContext = this.viewModel;
         this.Loaded += this.SnapshotToolWindowControl_Loaded;
-        this.Unloaded += this.SnapshotToolWindowControl_Unloaded;
     }
 
     private async void SnapshotToolWindowControl_Loaded(object sender, RoutedEventArgs e)
     {
-        await this.viewModel.InitializeAsync().ConfigureAwait(true);
+        if (this.disposed)
+        {
+            return;
+        }
+
+        try
+        {
+            await this.viewModel.InitializeAsync().ConfigureAwait(true);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
     }
 
-    private void SnapshotToolWindowControl_Unloaded(object sender, RoutedEventArgs e)
+    public void Dispose()
     {
+        if (this.disposed)
+        {
+            return;
+        }
+
+        this.disposed = true;
         this.viewModel.Dispose();
     }
 

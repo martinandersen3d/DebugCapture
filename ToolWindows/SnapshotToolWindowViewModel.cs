@@ -19,6 +19,7 @@ internal sealed class SnapshotToolWindowViewModel : ObservableObject, IDisposabl
 {
     private readonly SnapshotRepository repository;
     private CancellationTokenSource? refreshCancellationTokenSource;
+    private bool disposed;
 
     public SnapshotToolWindowViewModel()
         : this(new SnapshotRepository())
@@ -82,8 +83,12 @@ internal sealed class SnapshotToolWindowViewModel : ObservableObject, IDisposabl
 
     public async Task RefreshAsync()
     {
-        this.refreshCancellationTokenSource?.Cancel();
-        this.refreshCancellationTokenSource?.Dispose();
+        if (this.disposed)
+        {
+            return;
+        }
+
+        this.CancelRefresh();
         this.refreshCancellationTokenSource = new CancellationTokenSource();
         var cancellationToken = this.refreshCancellationTokenSource.Token;
 
@@ -152,8 +157,34 @@ internal sealed class SnapshotToolWindowViewModel : ObservableObject, IDisposabl
 
     public void Dispose()
     {
-        this.refreshCancellationTokenSource?.Cancel();
-        this.refreshCancellationTokenSource?.Dispose();
+        if (this.disposed)
+        {
+            return;
+        }
+
+        this.disposed = true;
+        this.CancelRefresh();
+    }
+
+    private void CancelRefresh()
+    {
+        var cancellationTokenSource = this.refreshCancellationTokenSource;
+        this.refreshCancellationTokenSource = null;
+
+        if (cancellationTokenSource is null)
+        {
+            return;
+        }
+
+        try
+        {
+            cancellationTokenSource.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+
+        cancellationTokenSource.Dispose();
     }
 
     private void SelectFirst()
