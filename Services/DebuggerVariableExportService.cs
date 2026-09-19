@@ -460,7 +460,7 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
 
         public int MaxChildrenPerNode { get; set; } = 100;
 
-        public int MaxNodesPerRoot { get; set; } = 100;
+        public int MaxNodesPerRoot { get; set; } = 1000;
 
         public int MaxValueLength { get; set; } = 10000;
 
