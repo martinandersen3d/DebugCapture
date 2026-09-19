@@ -43,7 +43,7 @@ The root object representing everything captured at a single debugger stop.
 | `Locals` | `List<SnapshotProperty>` | Variables from the debugger's **Locals** window at the time of capture. |
 | `Autos` | `List<SnapshotProperty>` | Variables from the debugger's **Autos** window (arguments and recently used expressions). |
 | `Watch1`–`Watch4` | `List<SnapshotProperty>` | Snapshots of up to four Watch windows. *(Note: not yet populated by the export service — reserved for future implementation.)* |
-| `Exception` | `SnapshotException` | Populated only when `Trigger == SnapshotTrigger.Exception`. Contains summary-first exception details (type, message, stack trace, and related scalar fields). See [`SnapshotException`](#snapshotexception) below. |
+| `Exception` | `SnapshotException` | Populated only when `Trigger == SnapshotTrigger.Exception`. Contains a performance-first exception summary, primarily message and stack trace. See [`SnapshotException`](#snapshotexception) below. |
 | `CallStack` | `List<SnapshotCallStackFrame>` | The full call stack at the time of capture, ordered from innermost (current) frame outward. |
 | `Info` | `SnapshotInfo` | Session/environment context (project, solution, process, thread). See [`SnapshotInfo`](#snapshotinfo) below. |
 | `ImageFilePath` | `string` | Full path to the paired screenshot (`.png`) file for this snapshot, so a viewer/tool doesn't need to infer pairing purely from filename convention. |
@@ -81,16 +81,16 @@ A single name/value/type entry, used for Locals, Autos, Watches, and exception m
 
 ## `SnapshotException`
 
-Details about an exception, populated when `Snapshot.Trigger` is `Exception`. Some fields are CLR/.NET-specific and may be empty when debugging non-.NET targets (native C++, Python, etc.) — see notes below.
+Details about an exception, populated when `Snapshot.Trigger` is `Exception`. Exception capture prioritizes performance and avoids expanding the exception object or normal locals/autos by default.
 
 | Property | Type | Description |
 |---|---|---|
-| `TypeName` | `string` | Fully qualified exception type name (e.g. `System.NullReferenceException`). Universal across debugger types. |
-| `Message` | `string` | The exception's message text. Universal across debugger types. |
-| `Source` | `string` | **CLR-specific** (`Exception.Source`). May be empty for non-.NET debug targets. |
-| `TargetSite` | `string` | **CLR-specific** (`Exception.TargetSite`, a reflection concept). May be empty for non-.NET debug targets. |
-| `HResult` | `string` | Native (Win32/COM) or CLR HRESULT value, when available. Exists in both managed and native contexts, though its meaning/format differs. |
-| `StackTrace` | `string` | Raw stack trace text. Format varies by language/runtime (.NET managed frames vs. native call stack vs. other runtimes), but the field itself is universal. |
+| `TypeName` | `string` | Usually empty by default. Reserved for future/enhanced exception capture. |
+| `Message` | `string` | The exception's message text. Captured by default. |
+| `Source` | `string` | Usually empty by default. Reserved for future/enhanced exception capture. |
+| `TargetSite` | `string` | Usually empty by default. Reserved for future/enhanced exception capture. |
+| `HResult` | `string` | Usually empty by default. Reserved for future/enhanced exception capture. |
+| `StackTrace` | `string` | Raw stack trace text. Captured by default when available. |
 | `InnerException` | `SnapshotException` | **CLR-specific** recursive reference to a wrapped/chained exception (`Exception.InnerException`). `null` when there is no inner exception or the concept doesn't apply to the debugged language. |
 | `MembersTruncated` | `bool` | `true` when exception member expansion was omitted or cut off by the extraction budget. Exception member expansion is disabled by default. |
 | `Members` | `List<SnapshotProperty>` | Optional exception members. Empty by default because exception capture is summary-first and does not expand the whole exception object graph. |

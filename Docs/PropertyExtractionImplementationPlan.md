@@ -93,9 +93,11 @@ Apply the max value length to debugger strings during extraction.
 
 ### 6. Summary-First Exception Capture
 
-Keep exception capture focused on scalar fields.
+Keep exception capture focused on the fastest useful scalar fields.
 
-- Capture type, message, source, target site, HResult, stack trace, and inner exception summary.
+- Capture exception message and stack trace by default.
+- Continue capturing normal locals/autos during exception-triggered captures.
+- Keep `$exception` and exception-typed local values scalar-only by default.
 - Do not expand `$exception.DataMembers` by default.
 - Leave exception member expansion disabled unless options are explicitly changed later.
 

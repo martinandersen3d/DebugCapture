@@ -50,7 +50,7 @@ The first production pass should focus on five core features:
 | 2 | Extraction time budget | Stop main-thread debugger extraction when the time budget is exceeded. | 0.95 | 0.85 | 0.95 | Phase 1 |
 | 3 | Bounded object graph expansion with child counts | Enforce max depth, max children, max total nodes, and record `ChildrenTotalCount` / `ChildrenSnapshotCount`. | 0.93 | 0.92 | 0.95 | Phase 1 |
 | 4 | String/value business rules | Shorten large values using the capture policy limit. | 0.95 | 0.95 | 0.95 | Phase 1 |
-| 5 | Summary-first exception capture | Capture useful exception fields without expanding the whole exception object graph. | 0.85 | 0.90 | 0.95 | Phase 1 |
+| 5 | Summary-first exception capture | Capture exception message/stack trace and still capture locals/autos, but do not expand exception objects found in locals. | 0.85 | 0.90 | 0.95 | Phase 1 |
 
 ## Current State
 
@@ -250,9 +250,11 @@ Exception snapshots should capture useful exception information without expandin
 Recommended behavior:
 
 - Keep dedicated `SnapshotException` fields as the primary exception representation.
-- Capture type, message, source, target site, HResult, and stack trace as best-effort scalar fields.
+- Capture message and stack trace as the default exception payload.
 - Apply string/value business rules to exception message and stack trace.
 - Do not recursively expand all `$exception.DataMembers` by default.
+- Continue capturing normal locals/autos during exception-triggered captures.
+- Do not expand `$exception` or exception-typed local values into child members by default.
 - If member capture is kept, use a very small exception member budget and rely on `MembersTruncated` to show that members were omitted.
 - Treat .NET-specific exception expressions as best-effort and do not let failures block the snapshot.
 
@@ -261,14 +263,14 @@ Example JSON intent:
 ```json
 {
   "Exception": {
-    "TypeName": "System.InvalidOperationException",
     "Message": "Operation failed...",
+    "StackTrace": "at Example.Service.Run()...",
     "MembersTruncated": true
   }
 }
 ```
 
-Reason: Exceptions are often large runtime objects. A summary-first policy keeps exception captures useful while avoiding deep runtime graph expansion and UI-thread delays.
+Reason: Exceptions are often large runtime objects. A message-and-stack-trace-first policy keeps exception captures useful while still preserving normal locals/autos, while avoiding deep expansion of `$exception` and other exception-typed local values.
 
 ## Recommended Implementation Phases
 

@@ -86,8 +86,9 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
             snapshot.Exception = BuildException(this.dte.Debugger, ExtractionOptions);
         }
 
-        snapshot.Locals = BuildExpressionList(() => stackFrame.Locals, budget);
-        snapshot.Autos = BuildExpressionList(() => stackFrame.Arguments, budget);
+        var isExceptionCapture = fileSet.Trigger == SnapshotTrigger.Exception;
+        snapshot.Locals = BuildExpressionList(() => stackFrame.Locals, budget, isExceptionCapture);
+        snapshot.Autos = BuildExpressionList(() => stackFrame.Arguments, budget, isExceptionCapture);
         snapshot.CallStack = BuildCallStack(this.dte.Debugger?.CurrentThread?.StackFrames, stackFrame, snapshot);
 
         return snapshot;
@@ -106,51 +107,20 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
 
     private static SnapshotException BuildException(Debugger debugger, SnapshotExtractionOptions options)
     {
-        return BuildException(debugger, "$exception", 0, options);
+        return BuildException(debugger, "$exception", options);
     }
 
-    private static SnapshotException BuildException(Debugger debugger, string expressionText, int depth, SnapshotExtractionOptions options)
+    private static SnapshotException BuildException(Debugger debugger, string expressionText, SnapshotExtractionOptions options)
     {
         var snapshotException = new SnapshotException();
 
         try
         {
-            var expression = debugger.GetExpression(expressionText, UseAutoExpandRules: true, Timeout: 1000);
-            if (expression is null || !expression.IsValidValue)
-            {
-                snapshotException.Message = "No current exception expression is available.";
-                return snapshotException;
-            }
-
-            snapshotException.TypeName = TruncateValue(GetDebuggerExpressionValue(debugger, expressionText + ".GetType().FullName"), options.MaxValueLength);
-            if (string.IsNullOrWhiteSpace(snapshotException.TypeName))
-            {
-                snapshotException.TypeName = GetSafeValue(() => expression.Type, options.MaxValueLength);
-            }
-
             snapshotException.Message = TruncateValue(GetDebuggerExpressionValue(debugger, expressionText + ".Message"), options.MaxValueLength);
-            if (string.IsNullOrWhiteSpace(snapshotException.Message))
-            {
-                snapshotException.Message = GetSafeValue(() => expression.Value, options.MaxValueLength);
-            }
-
-            snapshotException.Source = TruncateValue(GetDebuggerExpressionValue(debugger, expressionText + ".Source"), options.MaxValueLength);
-            snapshotException.TargetSite = TruncateValue(GetDebuggerExpressionValue(debugger, expressionText + ".TargetSite"), options.MaxValueLength);
-            snapshotException.HResult = TruncateValue(GetDebuggerExpressionValue(debugger, expressionText + ".HResult"), options.MaxValueLength);
             snapshotException.StackTrace = TruncateValue(GetDebuggerExpressionValue(debugger, expressionText + ".StackTrace"), options.MaxValueLength);
-
             if (options.MaxExceptionMembers <= 0)
             {
                 snapshotException.MembersTruncated = true;
-            }
-
-            if (depth < options.MaxDepth)
-            {
-                var innerException = TryGetExpression(debugger, expressionText + ".InnerException");
-                if (innerException is not null && innerException.IsValidValue && !string.Equals(GetSafeValue(() => innerException.Value, options.MaxValueLength), "null", StringComparison.OrdinalIgnoreCase))
-                {
-                    snapshotException.InnerException = BuildException(debugger, expressionText + ".InnerException", depth + 1, options);
-                }
             }
         }
         catch (Exception exception)
@@ -165,7 +135,7 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
     {
         try
         {
-            return debugger.GetExpression(expressionText, UseAutoExpandRules: true, Timeout: 1000);
+            return debugger.GetExpression(expressionText, UseAutoExpandRules: false, Timeout: 200);
         }
         catch
         {
@@ -212,7 +182,7 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         return frames;
     }
 
-    private static List<SnapshotProperty> BuildExpressionList(Func<Expressions> expressionsFactory, SnapshotExtractionBudget budget)
+    private static List<SnapshotProperty> BuildExpressionList(Func<Expressions> expressionsFactory, SnapshotExtractionBudget budget, bool isExceptionCapture)
     {
         var properties = new List<SnapshotProperty>();
 
@@ -231,7 +201,7 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
                     return properties;
                 }
 
-                var property = BuildSnapshotProperty(expression, 0, budget);
+                var property = BuildSnapshotProperty(expression, 0, budget, isExceptionCapture);
                 if (property is not null)
                 {
                     properties.Add(property);
@@ -250,7 +220,7 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         return properties;
     }
 
-    private static List<SnapshotProperty> BuildExpressionMembers(Expression expression, int depth, SnapshotExtractionBudget budget, out int? childrenTotalCount)
+    private static List<SnapshotProperty> BuildExpressionMembers(Expression expression, int depth, SnapshotExtractionBudget budget, bool isExceptionCapture, out int? childrenTotalCount)
     {
         var children = new List<SnapshotProperty>();
         childrenTotalCount = null;
@@ -277,7 +247,7 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
                     return children;
                 }
 
-                var child = BuildSnapshotProperty(member, depth + 1, budget);
+                var child = BuildSnapshotProperty(member, depth + 1, budget, isExceptionCapture);
                 if (child is null)
                 {
                     return children;
@@ -299,7 +269,7 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         return children;
     }
 
-    private static SnapshotProperty? BuildSnapshotProperty(Expression expression, int depth, SnapshotExtractionBudget budget)
+    private static SnapshotProperty? BuildSnapshotProperty(Expression expression, int depth, SnapshotExtractionBudget budget, bool isExceptionCapture)
     {
         if (!budget.TryConsumeNode())
         {
@@ -313,12 +283,12 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
             Type = GetSafeValue(() => expression.Type, budget.Options.MaxValueLength),
         };
 
-        if (depth >= budget.Options.MaxDepth || budget.IsExhausted)
+        if (depth >= budget.Options.MaxDepth || budget.IsExhausted || IsExceptionObject(property, isExceptionCapture))
         {
             return property;
         }
 
-        var children = BuildExpressionMembers(expression, depth, budget, out var childrenTotalCount);
+        var children = BuildExpressionMembers(expression, depth, budget, isExceptionCapture, out var childrenTotalCount);
         if (childrenTotalCount.HasValue)
         {
             property.ChildrenTotalCount = childrenTotalCount;
@@ -331,6 +301,17 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         }
 
         return property;
+    }
+
+    private static bool IsExceptionObject(SnapshotProperty property, bool isExceptionCapture)
+    {
+        if (!isExceptionCapture)
+        {
+            return false;
+        }
+
+        return string.Equals(property.Name, "$exception", StringComparison.OrdinalIgnoreCase) ||
+            (!string.IsNullOrEmpty(property.Type) && property.Type.IndexOf("Exception", StringComparison.OrdinalIgnoreCase) >= 0);
     }
 
     private static string GetSafeValue(Func<string> valueFactory)

@@ -258,6 +258,8 @@
                         <StackPanel>
                             <TextBlock Text="{Binding SelectedSnapshot.Exception.TypeName, StringFormat=Type: {0}}" FontFamily="Consolas" />
                             <TextBlock Text="{Binding SelectedSnapshot.Exception.Message, StringFormat=Message: {0}}" FontFamily="Consolas" TextWrapping="Wrap" />
+                            <TextBlock Text="StackTrace:" FontWeight="SemiBold" Margin="0,6,0,0" />
+                            <TextBlock Text="{Binding SelectedSnapshot.Exception.StackTrace}" FontFamily="Consolas" TextWrapping="Wrap" />
                             <TreeView ItemsSource="{Binding ExceptionMembers}" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" />
                         </StackPanel>
                     </Expander>
