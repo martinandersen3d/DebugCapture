@@ -12,12 +12,19 @@ namespace DebugCapture
     /// Helper class that exposes all GUIDs used across VS Package.
     /// </summary>
     internal sealed partial class PackageGuids
-    {    }
+    {
+        public const string guidDebugCapturePackageString = "522c1f58-2cff-43c4-8f68-96a201f8b4ce";
+        public static Guid guidDebugCapturePackage = new Guid(guidDebugCapturePackageString);
+
+        public const string guidDebugCaptureCommandSetString = "7aab9f4c-1724-4b2f-96f0-5a559566aa5d";
+        public static Guid guidDebugCaptureCommandSet = new Guid(guidDebugCaptureCommandSetString);
+    }
 
     /// <summary>
     /// Helper class that encapsulates all CommandIDs uses across VS Package.
     /// </summary>
     internal sealed partial class PackageIds
     {
+        public const int ShowSnapshotToolWindow = 0x0100;
     }
 }
