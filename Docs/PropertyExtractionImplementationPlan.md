@@ -30,7 +30,7 @@ Out of scope for this pass:
 | Max children per object | 100 |
 | Max normal string/value length | 10,000 chars |
 | Hard extraction cutoff | 1,500 ms |
-| Max total property nodes | 2,000 |
+| Max property nodes per root | 100 |
 | Exception member expansion | Disabled by default |
 | Overlapping captures | Skip while busy |
 
@@ -65,7 +65,7 @@ The budget enforces:
 
 - max depth,
 - max children per node,
-- max total property nodes,
+- max property nodes per root,
 - max extraction milliseconds,
 - max value length.
 
@@ -77,7 +77,8 @@ Rules:
 
 - Check the budget before reading `DataMembers`.
 - Check depth before reading `DataMembers`.
-- Capture roots until the global budget is exhausted.
+- Capture all visible roots as scalar rows until the time budget is exhausted.
+- Give each root its own 100-node budget, counting the root and captured descendants.
 - Capture at most 100 children per node.
 - Set `ChildrenTotalCount` when `DataMembers.Count` is available.
 - Set `ChildrenSnapshotCount` when child nodes are included.

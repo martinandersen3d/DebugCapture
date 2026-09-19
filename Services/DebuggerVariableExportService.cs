@@ -79,7 +79,7 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
             return snapshot;
         }
 
-        var budget = new SnapshotExtractionBudget(ExtractionOptions);
+        var extractionClock = new SnapshotExtractionClock(ExtractionOptions);
 
         if (fileSet.Trigger == SnapshotTrigger.Exception)
         {
@@ -87,8 +87,8 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         }
 
         var isExceptionCapture = fileSet.Trigger == SnapshotTrigger.Exception;
-        snapshot.Locals = BuildExpressionList(() => stackFrame.Locals, budget, isExceptionCapture);
-        snapshot.Autos = BuildExpressionList(() => stackFrame.Arguments, budget, isExceptionCapture);
+        snapshot.Locals = BuildExpressionList(() => stackFrame.Locals, extractionClock, isExceptionCapture);
+        snapshot.Autos = BuildExpressionList(() => stackFrame.Arguments, extractionClock, isExceptionCapture);
         snapshot.CallStack = BuildCallStack(this.dte.Debugger?.CurrentThread?.StackFrames, stackFrame, snapshot);
 
         return snapshot;
@@ -182,9 +182,10 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         return frames;
     }
 
-    private static List<SnapshotProperty> BuildExpressionList(Func<Expressions> expressionsFactory, SnapshotExtractionBudget budget, bool isExceptionCapture)
+    private static List<SnapshotProperty> BuildExpressionList(Func<Expressions> expressionsFactory, SnapshotExtractionClock extractionClock, bool isExceptionCapture)
     {
         var properties = new List<SnapshotProperty>();
+        var rootEntries = new List<SnapshotRootEntry>();
 
         try
         {
@@ -196,16 +197,28 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
 
             foreach (Expression expression in expressions)
             {
-                if (budget.IsExhausted)
+                if (extractionClock.IsTimeBudgetExhausted)
                 {
                     return properties;
                 }
 
-                var property = BuildSnapshotProperty(expression, 0, budget, isExceptionCapture);
+                var budget = new SnapshotExtractionBudget(ExtractionOptions, extractionClock);
+                var property = BuildSnapshotProperty(expression, 0, budget, isExceptionCapture, expandChildren: false);
                 if (property is not null)
                 {
                     properties.Add(property);
+                    rootEntries.Add(new SnapshotRootEntry(expression, property, budget));
                 }
+            }
+
+            foreach (var rootEntry in rootEntries)
+            {
+                if (extractionClock.IsTimeBudgetExhausted)
+                {
+                    break;
+                }
+
+                ExpandSnapshotProperty(rootEntry.Expression, rootEntry.Property, 0, rootEntry.Budget, isExceptionCapture);
             }
         }
         catch (Exception exception)
@@ -213,7 +226,7 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
             properties.Add(new SnapshotProperty
             {
                 Name = "Section",
-                Value = TruncateValue("<error: Unable to read section: " + exception.Message + ">", budget.Options.MaxValueLength),
+                Value = TruncateValue("<error: Unable to read section: " + exception.Message + ">", extractionClock.Options.MaxValueLength),
             });
         }
 
@@ -271,6 +284,11 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
 
     private static SnapshotProperty? BuildSnapshotProperty(Expression expression, int depth, SnapshotExtractionBudget budget, bool isExceptionCapture)
     {
+        return BuildSnapshotProperty(expression, depth, budget, isExceptionCapture, expandChildren: true);
+    }
+
+    private static SnapshotProperty? BuildSnapshotProperty(Expression expression, int depth, SnapshotExtractionBudget budget, bool isExceptionCapture, bool expandChildren)
+    {
         if (!budget.TryConsumeNode())
         {
             return null;
@@ -283,9 +301,20 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
             Type = GetSafeValue(() => expression.Type, budget.Options.MaxValueLength),
         };
 
-        if (depth >= budget.Options.MaxDepth || budget.IsExhausted || IsExceptionObject(property, isExceptionCapture))
+        if (!expandChildren)
         {
             return property;
+        }
+
+        ExpandSnapshotProperty(expression, property, depth, budget, isExceptionCapture);
+        return property;
+    }
+
+    private static void ExpandSnapshotProperty(Expression expression, SnapshotProperty property, int depth, SnapshotExtractionBudget budget, bool isExceptionCapture)
+    {
+        if (depth >= budget.Options.MaxDepth || budget.IsExhausted || IsExceptionObject(property, isExceptionCapture))
+        {
+            return;
         }
 
         var children = BuildExpressionMembers(expression, depth, budget, isExceptionCapture, out var childrenTotalCount);
@@ -299,8 +328,6 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         {
             property.Children = children;
         }
-
-        return property;
     }
 
     private static bool IsExceptionObject(SnapshotProperty property, bool isExceptionCapture)
@@ -433,7 +460,7 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
 
         public int MaxChildrenPerNode { get; set; } = 100;
 
-        public int MaxTotalNodes { get; set; } = 2000;
+        public int MaxNodesPerRoot { get; set; } = 100;
 
         public int MaxValueLength { get; set; } = 10000;
 
@@ -442,22 +469,37 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         public int MaxExceptionMembers { get; set; }
     }
 
-    private sealed class SnapshotExtractionBudget
+    private sealed class SnapshotExtractionClock
     {
         private readonly System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
-        public SnapshotExtractionBudget(SnapshotExtractionOptions options)
+        public SnapshotExtractionClock(SnapshotExtractionOptions options)
         {
             this.Options = options ?? throw new ArgumentNullException(nameof(options));
         }
 
         public SnapshotExtractionOptions Options { get; }
 
+        public bool IsTimeBudgetExhausted => this.stopwatch.ElapsedMilliseconds >= this.Options.MaxExtractionMilliseconds;
+    }
+
+    private sealed class SnapshotExtractionBudget
+    {
+        private readonly SnapshotExtractionClock extractionClock;
+
+        public SnapshotExtractionBudget(SnapshotExtractionOptions options, SnapshotExtractionClock extractionClock)
+        {
+            this.Options = options ?? throw new ArgumentNullException(nameof(options));
+            this.extractionClock = extractionClock ?? throw new ArgumentNullException(nameof(extractionClock));
+        }
+
+        public SnapshotExtractionOptions Options { get; }
+
         public int CapturedNodes { get; private set; }
 
-        public bool IsNodeBudgetExhausted => this.CapturedNodes >= this.Options.MaxTotalNodes;
+        public bool IsNodeBudgetExhausted => this.CapturedNodes >= this.Options.MaxNodesPerRoot;
 
-        public bool IsTimeBudgetExhausted => this.stopwatch.ElapsedMilliseconds >= this.Options.MaxExtractionMilliseconds;
+        public bool IsTimeBudgetExhausted => this.extractionClock.IsTimeBudgetExhausted;
 
         public bool IsExhausted => this.IsNodeBudgetExhausted || this.IsTimeBudgetExhausted;
 
@@ -471,5 +513,21 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
             this.CapturedNodes++;
             return true;
         }
+    }
+
+    private sealed class SnapshotRootEntry
+    {
+        public SnapshotRootEntry(Expression expression, SnapshotProperty property, SnapshotExtractionBudget budget)
+        {
+            this.Expression = expression ?? throw new ArgumentNullException(nameof(expression));
+            this.Property = property ?? throw new ArgumentNullException(nameof(property));
+            this.Budget = budget ?? throw new ArgumentNullException(nameof(budget));
+        }
+
+        public Expression Expression { get; }
+
+        public SnapshotProperty Property { get; }
+
+        public SnapshotExtractionBudget Budget { get; }
     }
 }

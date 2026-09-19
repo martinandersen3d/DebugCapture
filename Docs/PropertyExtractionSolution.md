@@ -32,15 +32,15 @@ These business rules are the source of truth for the first implementation. Other
 | Max normal string/value length | 10,000 chars |
 | Normal extraction target | 250-500 ms |
 | Hard extraction cutoff | 1,500 ms |
-| Max total property nodes | 2,000 |
+| Max property nodes per root | 100 |
 | Exception member expansion | Disabled by default |
-| Root locals | Capture visible roots until global budget is hit |
-| Root autos | Capture visible roots until global budget is hit |
+| Root locals | Capture all visible roots as scalar rows until the time budget is hit |
+| Root autos | Capture all visible roots as scalar rows until the time budget is hit |
 | Overlapping captures | Skip while busy; never queue unlimited captures |
 
 The key principle is:
 
-> Root-level capture should be broad; nested capture should be strictly bounded and explicit about what was omitted. Exception capture should be summary-first and should not expand the whole exception object.
+> Root-level capture should be broad; every visible root should be captured as a scalar row when time allows. Nested capture should be strictly bounded per root and explicit about what was omitted. Exception capture should be summary-first and should not expand the whole exception object.
 
 The first production pass should focus on five core features:
 
@@ -48,7 +48,7 @@ The first production pass should focus on five core features:
 |---:|---|---|---:|---:|---:|---|
 | 1 | Capture backpressure / single-flight capture | Prevent unlimited overlapping captures; skip while busy. | 0.95 | 0.90 | 0.95 | Phase 0 |
 | 2 | Extraction time budget | Stop main-thread debugger extraction when the time budget is exceeded. | 0.95 | 0.85 | 0.95 | Phase 1 |
-| 3 | Bounded object graph expansion with child counts | Enforce max depth, max children, max total nodes, and record `ChildrenTotalCount` / `ChildrenSnapshotCount`. | 0.93 | 0.92 | 0.95 | Phase 1 |
+| 3 | Bounded object graph expansion with child counts | Enforce max depth, max children, max nodes per root, and record `ChildrenTotalCount` / `ChildrenSnapshotCount`. | 0.93 | 0.92 | 0.95 | Phase 1 |
 | 4 | String/value business rules | Shorten large values using the capture policy limit. | 0.95 | 0.95 | 0.95 | Phase 1 |
 | 5 | Summary-first exception capture | Capture exception message/stack trace and still capture locals/autos, but do not expand exception objects found in locals. | 0.85 | 0.90 | 0.95 | Phase 1 |
 
@@ -199,7 +199,8 @@ Recommended behavior:
 
 - Keep max depth at `3` by default.
 - Limit children per object to `100` by default.
-- Limit total captured property nodes to `2,000` by default.
+- Limit captured property nodes to `100` per root-level property by default, counting the root and all captured descendants.
+- Capture all visible root-level Locals/Autos as scalar rows until the time budget is hit; do not stop root enumeration because another root used its node budget.
 - Check depth before accessing `DataMembers` to avoid unnecessary debugger work.
 - Set `ChildrenTotalCount` from `Expression.DataMembers.Count` when available and cheap.
 - Set `ChildrenSnapshotCount` to the number of child nodes actually included in the snapshot.
@@ -322,7 +323,7 @@ internal sealed class SnapshotExtractionOptions
 
     public int MaxChildrenPerNode { get; set; } = 100;
 
-    public int MaxTotalNodes { get; set; } = 2000;
+    public int MaxNodesPerRoot { get; set; } = 100;
 
     public int MaxValueLength { get; set; } = 10000;
 
@@ -343,7 +344,7 @@ internal sealed class SnapshotExtractionBudget
 
     public int CapturedNodes { get; private set; }
 
-    public bool IsNodeBudgetExhausted => this.CapturedNodes >= this.Options.MaxTotalNodes;
+    public bool IsNodeBudgetExhausted => this.CapturedNodes >= this.Options.MaxNodesPerRoot;
 
     public bool IsTimeBudgetExhausted => this.stopwatch.ElapsedMilliseconds >= this.Options.MaxExtractionMilliseconds;
 
