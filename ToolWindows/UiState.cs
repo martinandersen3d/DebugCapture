@@ -8,6 +8,7 @@ internal sealed class UiState : ObservableObject
     private SnapshotListItem? selectedSnapshot;
     private int selectedIndex = -1;
     private bool isLoading;
+    private bool isSideBySideLayout = true;
     private string statusMessage = string.Empty;
 
     public ObservableCollection<SnapshotListItem> Snapshots { get; } = new();
@@ -28,6 +29,12 @@ internal sealed class UiState : ObservableObject
     {
         get => this.isLoading;
         set => this.SetProperty(ref this.isLoading, value);
+    }
+
+    public bool IsSideBySideLayout
+    {
+        get => this.isSideBySideLayout;
+        set => this.SetProperty(ref this.isSideBySideLayout, value);
     }
 
     public string StatusMessage

@@ -43,6 +43,7 @@ internal sealed class SnapshotToolWindowViewModel : ObservableObject, IDisposabl
         this.LastCommand = new RelayCommand(this.SelectLast, () => this.State.Snapshots.Count > 0);
         this.OpenSourceCommand = new AsyncRelayCommand(this.OpenSelectedSourceAsync, () => this.State.SelectedSnapshot is not null);
         this.OpenInExplorerCommand = new RelayCommand(this.OpenSelectedInExplorer, () => this.State.SelectedSnapshot is not null);
+        this.ToggleLayoutCommand = new RelayCommand(this.ToggleLayout);
 
         this.notificationService.CaptureCompleted += this.OnCaptureCompleted;
     }
@@ -63,9 +64,15 @@ internal sealed class SnapshotToolWindowViewModel : ObservableObject, IDisposabl
 
     public ICommand OpenInExplorerCommand { get; }
 
+    public ICommand ToggleLayoutCommand { get; }
+
     public int SnapshotCount => this.State.Snapshots.Count;
 
     public int MaxSnapshotIndex => Math.Max(0, this.State.Snapshots.Count - 1);
+
+    public string LayoutToggleText => this.State.IsSideBySideLayout ? "▤" : "▥";
+
+    public string LayoutToggleToolTip => this.State.IsSideBySideLayout ? "Switch to stacked layout" : "Switch to side-by-side layout";
 
     public Snapshot? SelectedSnapshot => this.State.SelectedSnapshot?.Snapshot;
 
@@ -247,6 +254,13 @@ internal sealed class SnapshotToolWindowViewModel : ObservableObject, IDisposabl
     private void SelectLast()
     {
         this.SelectSnapshotByIndex(this.State.Snapshots.Count - 1);
+    }
+
+    private void ToggleLayout()
+    {
+        this.State.IsSideBySideLayout = !this.State.IsSideBySideLayout;
+        this.OnPropertyChanged(nameof(this.LayoutToggleText));
+        this.OnPropertyChanged(nameof(this.LayoutToggleToolTip));
     }
 
     private void SyncSelectedSnapshotFromIndex()
@@ -455,6 +469,8 @@ internal sealed class SnapshotToolWindowViewModel : ObservableObject, IDisposabl
         this.OnPropertyChanged(nameof(this.SnapshotCount));
         this.OnPropertyChanged(nameof(this.MaxSnapshotIndex));
         this.OnPropertyChanged(nameof(this.SelectedSnapshot));
+        this.OnPropertyChanged(nameof(this.LayoutToggleText));
+        this.OnPropertyChanged(nameof(this.LayoutToggleToolTip));
         this.OnPropertyChanged(nameof(this.Locals));
         this.OnPropertyChanged(nameof(this.Autos));
         this.OnPropertyChanged(nameof(this.Watch1));
