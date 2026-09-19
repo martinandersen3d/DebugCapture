@@ -18,10 +18,14 @@ public partial class SnapshotToolWindowControl : UserControl, IDisposable
         this.InitializeComponent();
         this.DataContext = this.viewModel;
         this.Loaded += this.SnapshotToolWindowControl_Loaded;
+        this.Unloaded += this.SnapshotToolWindowControl_Unloaded;
+        this.IsVisibleChanged += this.SnapshotToolWindowControl_IsVisibleChanged;
     }
 
     private async void SnapshotToolWindowControl_Loaded(object sender, RoutedEventArgs e)
     {
+        this.viewModel.IsWindowVisible = this.IsVisible;
+
         if (this.disposed)
         {
             return;
@@ -34,6 +38,16 @@ public partial class SnapshotToolWindowControl : UserControl, IDisposable
         catch (ObjectDisposedException)
         {
         }
+    }
+
+    private void SnapshotToolWindowControl_Unloaded(object sender, RoutedEventArgs e)
+    {
+        this.viewModel.IsWindowVisible = false;
+    }
+
+    private void SnapshotToolWindowControl_IsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        this.viewModel.IsWindowVisible = this.IsVisible;
     }
 
     public void Dispose()

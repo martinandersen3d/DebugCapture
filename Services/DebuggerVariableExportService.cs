@@ -22,6 +22,7 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
     private readonly DTE2 dte;
     private readonly JoinableTaskFactory joinableTaskFactory;
     private readonly IOutputWindowLogger logger;
+    private readonly ICaptureNotificationService notificationService;
     private static readonly JsonSerializerSettings JsonSerializerSettings = new()
     {
         Formatting = Formatting.Indented,
@@ -29,11 +30,12 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         Converters = { new StringEnumConverter() },
     };
 
-    public DebuggerVariableExportService(DTE2 dte, JoinableTaskFactory joinableTaskFactory, IOutputWindowLogger logger)
+    public DebuggerVariableExportService(DTE2 dte, JoinableTaskFactory joinableTaskFactory, IOutputWindowLogger logger, ICaptureNotificationService notificationService)
     {
         this.dte = dte ?? throw new ArgumentNullException(nameof(dte));
         this.joinableTaskFactory = joinableTaskFactory ?? throw new ArgumentNullException(nameof(joinableTaskFactory));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        this.notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
     }
 
     public async Task ExportAsync(CaptureFileSet fileSet)
@@ -48,6 +50,7 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
             var snapshot = await this.BuildSnapshotAsync(fileSet).ConfigureAwait(true);
             var content = JsonConvert.SerializeObject(snapshot, JsonSerializerSettings);
             await Task.Run(() => WriteFileAsync(fileSet.VariablesFilePath, content)).ConfigureAwait(false);
+            this.notificationService.NotifyCaptureCompleted(fileSet.VariablesFilePath);
         }
         catch (Exception exception)
         {

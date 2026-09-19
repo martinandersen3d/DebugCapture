@@ -11,6 +11,8 @@ using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Threading;
 using System.Windows.Input;
 
 namespace DebugCapture.ToolWindows;
@@ -18,17 +20,20 @@ namespace DebugCapture.ToolWindows;
 internal sealed class SnapshotToolWindowViewModel : ObservableObject, IDisposable
 {
     private readonly SnapshotRepository repository;
+    private readonly ICaptureNotificationService notificationService;
     private CancellationTokenSource? refreshCancellationTokenSource;
     private bool disposed;
+    private bool isWindowVisible;
 
     public SnapshotToolWindowViewModel()
-        : this(new SnapshotRepository())
+        : this(new SnapshotRepository(), CaptureNotificationService.Shared)
     {
     }
 
-    public SnapshotToolWindowViewModel(SnapshotRepository repository)
+    public SnapshotToolWindowViewModel(SnapshotRepository repository, ICaptureNotificationService notificationService)
     {
         this.repository = repository ?? throw new ArgumentNullException(nameof(repository));
+        this.notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
         this.RefreshCommand = new AsyncRelayCommand(this.RefreshAsync);
         this.FirstCommand = new RelayCommand(this.SelectFirst, () => this.State.Snapshots.Count > 0);
         this.PreviousCommand = new RelayCommand(this.SelectPrevious, () => this.State.SelectedIndex > 0);
@@ -36,6 +41,8 @@ internal sealed class SnapshotToolWindowViewModel : ObservableObject, IDisposabl
         this.LastCommand = new RelayCommand(this.SelectLast, () => this.State.Snapshots.Count > 0);
         this.OpenSourceCommand = new AsyncRelayCommand(this.OpenSelectedSourceAsync, () => this.State.SelectedSnapshot is not null);
         this.OpenInExplorerCommand = new RelayCommand(this.OpenSelectedInExplorer, () => this.State.SelectedSnapshot is not null);
+
+        this.notificationService.CaptureCompleted += this.OnCaptureCompleted;
     }
 
     public UiState State { get; } = new();
@@ -59,6 +66,12 @@ internal sealed class SnapshotToolWindowViewModel : ObservableObject, IDisposabl
     public int MaxSnapshotIndex => Math.Max(0, this.State.Snapshots.Count - 1);
 
     public Snapshot? SelectedSnapshot => this.State.SelectedSnapshot?.Snapshot;
+
+    public bool IsWindowVisible
+    {
+        get => this.isWindowVisible;
+        set => this.SetProperty(ref this.isWindowVisible, value);
+    }
 
     public IEnumerable<SnapshotProperty>? Locals => this.SelectedSnapshot?.Locals;
 
@@ -163,7 +176,30 @@ internal sealed class SnapshotToolWindowViewModel : ObservableObject, IDisposabl
         }
 
         this.disposed = true;
+        this.notificationService.CaptureCompleted -= this.OnCaptureCompleted;
         this.CancelRefresh();
+    }
+
+    private void OnCaptureCompleted(object? sender, CaptureCompletedEventArgs e)
+    {
+        if (this.disposed || !this.IsWindowVisible || !IsJsonSnapshotFile(e.FilePath))
+        {
+            return;
+        }
+
+        var dispatcher = Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher;
+        _ = dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (!this.disposed && this.IsWindowVisible)
+            {
+                this.RefreshCommand.Execute(null);
+            }
+        }), DispatcherPriority.Background);
+    }
+
+    private static bool IsJsonSnapshotFile(string filePath)
+    {
+        return string.Equals(Path.GetExtension(filePath), ".json", StringComparison.OrdinalIgnoreCase);
     }
 
     private void CancelRefresh()
