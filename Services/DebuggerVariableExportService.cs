@@ -456,7 +456,7 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
 
     private sealed class SnapshotExtractionOptions
     {
-        public int MaxDepth { get; set; } = 3;
+        public int MaxDepth { get; set; } = 2;
 
         public int MaxChildrenPerNode { get; set; } = 100;
 
