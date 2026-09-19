@@ -74,4 +74,50 @@ Also take screenshot on:
 - Exceptions - also in featureflag
 
 New feature:
--  screenshot Filename will be suffixed with allcaps, example: "-EXCEPTION", "-STEP-IN", "-BREAKPOINT" etc 
+-  screenshot Filename will be suffixed with allcaps, example: "-EXCEPTION", "-STEP-IN", "-BREAKPOINT" etc
+
+---
+
+# Current business rules
+
+These rules describe the current implemented behavior and should guide future changes.
+
+## Capture triggers and files
+
+- Capture types are controlled by feature flags for breakpoints, steps, and exceptions.
+- Captures are single-flight: if one capture is already running, the next capture is skipped rather than queued.
+- Each capture writes a paired `.png` screenshot and `.json` debugger snapshot to `%USERPROFILE%\Pictures\VSScreenshots`.
+- File names use `yyyy-MM-dd__HH-mm-ss-fff_ACTION.ext`, where `ACTION` is `BREAKPOINT`, `STEP-IN`, `STEP-OVER`, or `EXCEPTION`.
+
+## Debugger extraction rules
+
+- Use the Visual Studio `EnvDTE` debugger object model for cross-language Locals, Autos/arguments, values, types, and data members.
+- Keep all DTE/debugger reads on the Visual Studio main thread.
+- Do not wrap `EnvDTE` expression traversal in `Task.Run`; performance should come from doing less debugger work.
+- Serialization and file I/O should happen off the main thread after the snapshot object is built.
+- Root-level Locals and Autos are captured first as scalar rows before nested expansion starts.
+- Nested extraction is bounded by:
+  - max object depth: `2`,
+  - max children per object: `100`,
+  - max property nodes per root: `1000`,
+  - max value length: `10,000` characters,
+  - hard extraction cutoff: `1,500 ms`.
+- There is no snapshot-wide property-node limit; node budgets are per root variable.
+- `ChildrenTotalCount` and `ChildrenSnapshotCount` are used to show when child lists are partial.
+- Large values are truncated with an obvious cutoff marker.
+
+## Exception capture rules
+
+- Exception captures still include normal Locals, Autos, and CallStack when available.
+- Dedicated exception capture is summary-first: capture the exception message and stack trace by default.
+- Do not expand `$exception.DataMembers` by default.
+- During exception-triggered captures, keep `$exception` and exception-typed local values scalar-only to avoid expanding expensive runtime exception internals.
+
+## Snapshot UI rules
+
+- Snapshot details use one unified tree view instead of separate accordion/expander sections.
+- The detail tree keeps a `Name | Value | Type` table-style layout.
+- Top-level detail nodes include Locals, Autos, Watch 1-4, Exception, and CallStack.
+- Expanded tree nodes are remembered in-session while the tool window/view model is open.
+- The default tool window layout is side-by-side: snapshot list on the left, snapshot detail on the right.
+- A layout toggle switches between side-by-side and stacked layouts.
