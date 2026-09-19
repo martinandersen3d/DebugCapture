@@ -6,6 +6,7 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
@@ -52,6 +53,7 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
 
             var content = JsonConvert.SerializeObject(snapshot, JsonSerializerSettings);
             timer.LogCheckpoint("JSON serialized");
+            PerformanceTimer.LogMetric(this.logger, "Snapshot JSON size " + fileSet.Trigger, "bytes=" + Encoding.UTF8.GetByteCount(content));
 
             await Task.Run(() => WriteFileAsync(fileSet.VariablesFilePath, content)).ConfigureAwait(false);
             timer.LogCheckpoint("JSON file written");
@@ -93,6 +95,7 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         }
 
         var extractionClock = new SnapshotExtractionClock(ExtractionOptions);
+        var metrics = new SnapshotExtractionMetrics();
 
         if (fileSet.Trigger == SnapshotTrigger.Exception)
         {
@@ -100,15 +103,20 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
             timer.LogCheckpoint("Exception summary");
         }
 
+        var extractionStopwatch = System.Diagnostics.Stopwatch.StartNew();
         var isExceptionCapture = fileSet.Trigger == SnapshotTrigger.Exception;
-        snapshot.Locals = BuildExpressionList(() => stackFrame.Locals, extractionClock, isExceptionCapture);
+        snapshot.Locals = BuildExpressionList("Locals", () => stackFrame.Locals, extractionClock, isExceptionCapture, metrics);
         timer.LogCheckpoint("Locals");
 
-        snapshot.Autos = BuildExpressionList(() => stackFrame.Arguments, extractionClock, isExceptionCapture);
+        snapshot.Autos = BuildExpressionList("Autos", () => stackFrame.Arguments, extractionClock, isExceptionCapture, metrics);
         timer.LogCheckpoint("Autos");
+        extractionStopwatch.Stop();
 
         snapshot.CallStack = BuildCallStack(this.dte.Debugger?.CurrentThread?.StackFrames, stackFrame, snapshot);
         timer.LogCheckpoint("CallStack");
+        PerformanceTimer.LogMetric(this.logger, "Snapshot extraction metrics " + fileSet.Trigger, metrics.ToLogDetail());
+        PerformanceTimer.LogMetric(this.logger, "Snapshot slow roots " + fileSet.Trigger, metrics.ToRootTimingLogDetail());
+        PerformanceTimer.LogMetric(this.logger, "Snapshot extraction accounted time " + fileSet.Trigger, metrics.ToAccountedTimeLogDetail(extractionStopwatch.ElapsedTicks));
 
         return snapshot;
     }
@@ -124,12 +132,12 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         };
     }
 
-    private static SnapshotException BuildException(Debugger debugger, SnapshotExtractionOptions options)
+    private static SnapshotException BuildException(EnvDTE.Debugger debugger, SnapshotExtractionOptions options)
     {
         return BuildException(debugger, "$exception", options);
     }
 
-    private static SnapshotException BuildException(Debugger debugger, string expressionText, SnapshotExtractionOptions options)
+    private static SnapshotException BuildException(EnvDTE.Debugger debugger, string expressionText, SnapshotExtractionOptions options)
     {
         var snapshotException = new SnapshotException();
 
@@ -150,7 +158,7 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         return snapshotException;
     }
 
-    private static Expression? TryGetExpression(Debugger debugger, string expressionText)
+    private static Expression? TryGetExpression(EnvDTE.Debugger debugger, string expressionText)
     {
         try
         {
@@ -162,7 +170,7 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         }
     }
 
-    private static string GetDebuggerExpressionValue(Debugger debugger, string expressionText)
+    private static string GetDebuggerExpressionValue(EnvDTE.Debugger debugger, string expressionText)
     {
         var expression = TryGetExpression(debugger, expressionText);
         if (expression is null || !expression.IsValidValue)
@@ -173,7 +181,7 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         return GetSafeValue(() => expression.Value);
     }
 
-    private static List<SnapshotCallStackFrame> BuildCallStack(StackFrames? stackFrames, StackFrame currentStackFrame, Snapshot snapshot)
+    private static List<SnapshotCallStackFrame> BuildCallStack(StackFrames? stackFrames, EnvDTE.StackFrame currentStackFrame, Snapshot snapshot)
     {
         var frames = new List<SnapshotCallStackFrame>();
         if (stackFrames is null || stackFrames.Count == 0)
@@ -183,7 +191,7 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
 
         var currentFunctionName = GetSafeValue(() => currentStackFrame.FunctionName);
         var index = 0;
-        foreach (StackFrame frame in stackFrames)
+        foreach (EnvDTE.StackFrame frame in stackFrames)
         {
             var isCurrentFrame = index == 0 || string.Equals(GetSafeValue(() => frame.FunctionName), currentFunctionName, StringComparison.Ordinal);
             frames.Add(new SnapshotCallStackFrame
@@ -201,43 +209,74 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         return frames;
     }
 
-    private static List<SnapshotProperty> BuildExpressionList(Func<Expressions> expressionsFactory, SnapshotExtractionClock extractionClock, bool isExceptionCapture)
+    private static List<SnapshotProperty> BuildExpressionList(string sectionName, Func<Expressions> expressionsFactory, SnapshotExtractionClock extractionClock, bool isExceptionCapture, SnapshotExtractionMetrics metrics)
     {
         var properties = new List<SnapshotProperty>();
         var rootEntries = new List<SnapshotRootEntry>();
 
         try
         {
+            var expressionsAccessStopwatch = System.Diagnostics.Stopwatch.StartNew();
             var expressions = expressionsFactory();
-            if (expressions is null || expressions.Count == 0)
+            expressionsAccessStopwatch.Stop();
+            metrics.AddExpressionsAccess(expressionsAccessStopwatch.ElapsedTicks);
+
+            var expressionsCountStopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var expressionsCount = expressions?.Count ?? 0;
+            expressionsCountStopwatch.Stop();
+            metrics.AddExpressionsCount(expressionsCountStopwatch.ElapsedTicks);
+
+            if (expressions is null || expressionsCount == 0)
             {
                 return properties;
             }
 
+            metrics.AddRootCount(sectionName, expressionsCount);
+
+            var rootEnumerationStopwatch = System.Diagnostics.Stopwatch.StartNew();
             foreach (Expression expression in expressions)
             {
+                rootEnumerationStopwatch.Stop();
+                metrics.AddExpressionsEnumeration(rootEnumerationStopwatch.ElapsedTicks);
+
                 if (extractionClock.IsTimeBudgetExhausted)
                 {
+                    metrics.AddTimeBudgetHit();
                     return properties;
                 }
 
                 var budget = new SnapshotExtractionBudget(ExtractionOptions, extractionClock);
-                var property = BuildSnapshotProperty(expression, 0, budget, isExceptionCapture, expandChildren: false);
+                var scalarStopwatch = System.Diagnostics.Stopwatch.StartNew();
+                var property = BuildSnapshotProperty(expression, 0, budget, isExceptionCapture, metrics, expandChildren: false);
+                scalarStopwatch.Stop();
                 if (property is not null)
                 {
                     properties.Add(property);
-                    rootEntries.Add(new SnapshotRootEntry(expression, property, budget));
+                    var rootTiming = metrics.AddRootTiming(sectionName, property.Name, scalarStopwatch.ElapsedTicks);
+                    rootEntries.Add(new SnapshotRootEntry(expression, property, budget, rootTiming));
                 }
+                else
+                {
+                    metrics.AddSkippedNode();
+                    metrics.AddBudgetHit(budget);
+                }
+
+                rootEnumerationStopwatch.Restart();
             }
+            rootEnumerationStopwatch.Stop();
 
             foreach (var rootEntry in rootEntries)
             {
                 if (extractionClock.IsTimeBudgetExhausted)
                 {
+                    metrics.AddTimeBudgetHit();
                     break;
                 }
 
-                ExpandSnapshotProperty(rootEntry.Expression, rootEntry.Property, 0, rootEntry.Budget, isExceptionCapture);
+                var expansionStopwatch = System.Diagnostics.Stopwatch.StartNew();
+                ExpandSnapshotProperty(rootEntry.Expression, rootEntry.Property, 0, rootEntry.Budget, isExceptionCapture, metrics);
+                expansionStopwatch.Stop();
+                rootEntry.RootTiming.AddExpansion(expansionStopwatch.ElapsedTicks);
             }
         }
         catch (Exception exception)
@@ -252,7 +291,7 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         return properties;
     }
 
-    private static List<SnapshotProperty> BuildExpressionMembers(Expression expression, int depth, SnapshotExtractionBudget budget, bool isExceptionCapture, out int? childrenTotalCount)
+    private static List<SnapshotProperty> BuildExpressionMembers(Expression expression, int depth, SnapshotExtractionBudget budget, bool isExceptionCapture, SnapshotExtractionMetrics metrics, out int? childrenTotalCount)
     {
         var children = new List<SnapshotProperty>();
         childrenTotalCount = null;
@@ -261,33 +300,58 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         {
             if (budget.IsExhausted || depth >= budget.Options.MaxDepth)
             {
+                if (depth >= budget.Options.MaxDepth)
+                {
+                    metrics.AddMaxDepthHit();
+                }
+
+                metrics.AddBudgetHit(budget);
                 return children;
             }
 
+            var dataMembersStopwatch = System.Diagnostics.Stopwatch.StartNew();
             var dataMembers = expression.DataMembers;
-            if (dataMembers is null || dataMembers.Count == 0)
+            dataMembersStopwatch.Stop();
+            metrics.AddDataMembers(dataMembersStopwatch.ElapsedTicks);
+
+            var dataMembersCountStopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var dataMembersCount = dataMembers?.Count ?? 0;
+            dataMembersCountStopwatch.Stop();
+            metrics.AddDataMembersCount(dataMembersCountStopwatch.ElapsedTicks);
+
+            if (dataMembers is null || dataMembersCount == 0)
             {
                 return children;
             }
 
-            childrenTotalCount = dataMembers.Count;
+            childrenTotalCount = dataMembersCount;
             var capturedChildren = 0;
+            var dataMembersEnumerationStopwatch = System.Diagnostics.Stopwatch.StartNew();
             foreach (Expression member in dataMembers)
             {
+                dataMembersEnumerationStopwatch.Stop();
+                metrics.AddDataMembersEnumeration(dataMembersEnumerationStopwatch.ElapsedTicks);
+
                 if (budget.IsExhausted || capturedChildren >= budget.Options.MaxChildrenPerNode)
                 {
+                    metrics.AddSkippedNode();
+                    metrics.AddBudgetHit(budget);
                     return children;
                 }
 
-                var child = BuildSnapshotProperty(member, depth + 1, budget, isExceptionCapture);
+                var child = BuildSnapshotProperty(member, depth + 1, budget, isExceptionCapture, metrics);
                 if (child is null)
                 {
+                    metrics.AddSkippedNode();
+                    metrics.AddBudgetHit(budget);
                     return children;
                 }
 
                 children.Add(child);
                 capturedChildren++;
+                dataMembersEnumerationStopwatch.Restart();
             }
+            dataMembersEnumerationStopwatch.Stop();
         }
         catch (Exception exception)
         {
@@ -301,23 +365,25 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         return children;
     }
 
-    private static SnapshotProperty? BuildSnapshotProperty(Expression expression, int depth, SnapshotExtractionBudget budget, bool isExceptionCapture)
+    private static SnapshotProperty? BuildSnapshotProperty(Expression expression, int depth, SnapshotExtractionBudget budget, bool isExceptionCapture, SnapshotExtractionMetrics metrics)
     {
-        return BuildSnapshotProperty(expression, depth, budget, isExceptionCapture, expandChildren: true);
+        return BuildSnapshotProperty(expression, depth, budget, isExceptionCapture, metrics, expandChildren: true);
     }
 
-    private static SnapshotProperty? BuildSnapshotProperty(Expression expression, int depth, SnapshotExtractionBudget budget, bool isExceptionCapture, bool expandChildren)
+    private static SnapshotProperty? BuildSnapshotProperty(Expression expression, int depth, SnapshotExtractionBudget budget, bool isExceptionCapture, SnapshotExtractionMetrics metrics, bool expandChildren)
     {
         if (!budget.TryConsumeNode())
         {
             return null;
         }
 
+        metrics.AddCapturedNode();
+
         var property = new SnapshotProperty
         {
-            Name = GetSafeValue(() => expression.Name, budget.Options.MaxValueLength),
-            Value = GetSafeValue(() => expression.Value, budget.Options.MaxValueLength),
-            Type = GetSafeValue(() => expression.Type, budget.Options.MaxValueLength),
+            Name = GetTimedSafeValue(() => expression.Name, budget.Options.MaxValueLength, metrics.AddNameRead),
+            Value = GetTimedSafeValue(() => expression.Value, budget.Options.MaxValueLength, metrics.AddValueRead),
+            Type = GetTimedSafeValue(() => expression.Type, budget.Options.MaxValueLength, metrics.AddTypeRead),
         };
 
         if (!expandChildren)
@@ -325,18 +391,24 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
             return property;
         }
 
-        ExpandSnapshotProperty(expression, property, depth, budget, isExceptionCapture);
+        ExpandSnapshotProperty(expression, property, depth, budget, isExceptionCapture, metrics);
         return property;
     }
 
-    private static void ExpandSnapshotProperty(Expression expression, SnapshotProperty property, int depth, SnapshotExtractionBudget budget, bool isExceptionCapture)
+    private static void ExpandSnapshotProperty(Expression expression, SnapshotProperty property, int depth, SnapshotExtractionBudget budget, bool isExceptionCapture, SnapshotExtractionMetrics metrics)
     {
         if (depth >= budget.Options.MaxDepth || budget.IsExhausted || IsExceptionObject(property, isExceptionCapture))
         {
+            if (depth >= budget.Options.MaxDepth)
+            {
+                metrics.AddMaxDepthHit();
+            }
+
+            metrics.AddBudgetHit(budget);
             return;
         }
 
-        var children = BuildExpressionMembers(expression, depth, budget, isExceptionCapture, out var childrenTotalCount);
+        var children = BuildExpressionMembers(expression, depth, budget, isExceptionCapture, metrics, out var childrenTotalCount);
         if (childrenTotalCount.HasValue)
         {
             property.ChildrenTotalCount = childrenTotalCount;
@@ -375,6 +447,20 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
     private static string GetSafeValue(Func<string> valueFactory, int maxLength)
     {
         return TruncateValue(GetSafeValue(valueFactory), maxLength);
+    }
+
+    private static string GetTimedSafeValue(Func<string> valueFactory, int maxLength, Action<long> elapsedTicksRecorder)
+    {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            return GetSafeValue(valueFactory, maxLength);
+        }
+        finally
+        {
+            stopwatch.Stop();
+            elapsedTicksRecorder(stopwatch.ElapsedTicks);
+        }
     }
 
     private static string TruncateValue(string value, int maxLength)
@@ -475,7 +561,7 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
 
     private sealed class SnapshotExtractionOptions
     {
-        public int MaxDepth { get; set; } = 2;
+        public int MaxDepth { get; set; } = 1;
 
         public int MaxChildrenPerNode { get; set; } = 100;
 
@@ -536,11 +622,12 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
 
     private sealed class SnapshotRootEntry
     {
-        public SnapshotRootEntry(Expression expression, SnapshotProperty property, SnapshotExtractionBudget budget)
+        public SnapshotRootEntry(Expression expression, SnapshotProperty property, SnapshotExtractionBudget budget, SnapshotExtractionMetrics.SnapshotRootTiming rootTiming)
         {
             this.Expression = expression ?? throw new ArgumentNullException(nameof(expression));
             this.Property = property ?? throw new ArgumentNullException(nameof(property));
             this.Budget = budget ?? throw new ArgumentNullException(nameof(budget));
+            this.RootTiming = rootTiming ?? throw new ArgumentNullException(nameof(rootTiming));
         }
 
         public Expression Expression { get; }
@@ -548,5 +635,288 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         public SnapshotProperty Property { get; }
 
         public SnapshotExtractionBudget Budget { get; }
+
+        public SnapshotExtractionMetrics.SnapshotRootTiming RootTiming { get; }
+    }
+
+    private sealed class SnapshotExtractionMetrics
+    {
+        private long nameTicks;
+        private long valueTicks;
+        private long typeTicks;
+        private long dataMembersTicks;
+        private long dataMembersCountTicks;
+        private long dataMembersEnumerationTicks;
+        private long expressionsAccessTicks;
+        private long expressionsCountTicks;
+        private long expressionsEnumerationTicks;
+        private readonly List<SnapshotRootTiming> rootTimings = new();
+
+        public int LocalRootCount { get; private set; }
+
+        public int AutoRootCount { get; private set; }
+
+        public int CapturedNodes { get; private set; }
+
+        public int SkippedNodes { get; private set; }
+
+        public int MaxDepthHits { get; private set; }
+
+        public int PerRootBudgetHits { get; private set; }
+
+        public int TimeBudgetHits { get; private set; }
+
+        public int DataMembersCalls { get; private set; }
+
+        public int NameReads { get; private set; }
+
+        public int ValueReads { get; private set; }
+
+        public int TypeReads { get; private set; }
+
+        public int ExpressionsAccessCalls { get; private set; }
+
+        public int ExpressionsCountReads { get; private set; }
+
+        public int ExpressionsEnumerationCalls { get; private set; }
+
+        public int DataMembersCountReads { get; private set; }
+
+        public int DataMembersEnumerationCalls { get; private set; }
+
+        public bool HitExtractionCutoff => this.TimeBudgetHits > 0;
+
+        public long AccountedTicks => this.nameTicks +
+            this.valueTicks +
+            this.typeTicks +
+            this.dataMembersTicks +
+            this.dataMembersCountTicks +
+            this.dataMembersEnumerationTicks +
+            this.expressionsAccessTicks +
+            this.expressionsCountTicks +
+            this.expressionsEnumerationTicks;
+
+        public void AddRootCount(string sectionName, int count)
+        {
+            if (string.Equals(sectionName, "Locals", StringComparison.OrdinalIgnoreCase))
+            {
+                this.LocalRootCount += count;
+            }
+            else if (string.Equals(sectionName, "Autos", StringComparison.OrdinalIgnoreCase))
+            {
+                this.AutoRootCount += count;
+            }
+        }
+
+        public void AddCapturedNode()
+        {
+            this.CapturedNodes++;
+        }
+
+        public void AddSkippedNode()
+        {
+            this.SkippedNodes++;
+        }
+
+        public void AddMaxDepthHit()
+        {
+            this.MaxDepthHits++;
+        }
+
+        public void AddBudgetHit(SnapshotExtractionBudget budget)
+        {
+            if (budget.IsTimeBudgetExhausted)
+            {
+                this.TimeBudgetHits++;
+            }
+
+            if (budget.IsNodeBudgetExhausted)
+            {
+                this.PerRootBudgetHits++;
+            }
+        }
+
+        public void AddTimeBudgetHit()
+        {
+            this.TimeBudgetHits++;
+        }
+
+        public void AddDataMembers(long elapsedTicks)
+        {
+            this.DataMembersCalls++;
+            this.dataMembersTicks += elapsedTicks;
+        }
+
+        public void AddDataMembersCount(long elapsedTicks)
+        {
+            this.DataMembersCountReads++;
+            this.dataMembersCountTicks += elapsedTicks;
+        }
+
+        public void AddDataMembersEnumeration(long elapsedTicks)
+        {
+            this.DataMembersEnumerationCalls++;
+            this.dataMembersEnumerationTicks += elapsedTicks;
+        }
+
+        public void AddExpressionsAccess(long elapsedTicks)
+        {
+            this.ExpressionsAccessCalls++;
+            this.expressionsAccessTicks += elapsedTicks;
+        }
+
+        public void AddExpressionsCount(long elapsedTicks)
+        {
+            this.ExpressionsCountReads++;
+            this.expressionsCountTicks += elapsedTicks;
+        }
+
+        public void AddExpressionsEnumeration(long elapsedTicks)
+        {
+            this.ExpressionsEnumerationCalls++;
+            this.expressionsEnumerationTicks += elapsedTicks;
+        }
+
+        public SnapshotRootTiming AddRootTiming(string sectionName, string rootName, long scalarTicks)
+        {
+            var timing = new SnapshotRootTiming(sectionName, rootName, scalarTicks);
+            this.rootTimings.Add(timing);
+            return timing;
+        }
+
+        public void AddNameRead(long elapsedTicks)
+        {
+            this.NameReads++;
+            this.nameTicks += elapsedTicks;
+        }
+
+        public void AddValueRead(long elapsedTicks)
+        {
+            this.ValueReads++;
+            this.valueTicks += elapsedTicks;
+        }
+
+        public void AddTypeRead(long elapsedTicks)
+        {
+            this.TypeReads++;
+            this.typeTicks += elapsedTicks;
+        }
+
+        public string ToLogDetail()
+        {
+            return "localsRoots=" + this.LocalRootCount +
+                "; autosRoots=" + this.AutoRootCount +
+                "; capturedNodes=" + this.CapturedNodes +
+                "; skippedNodes=" + this.SkippedNodes +
+                "; maxDepthHits=" + this.MaxDepthHits +
+                "; perRootBudgetHits=" + this.PerRootBudgetHits +
+                "; timeBudgetHits=" + this.TimeBudgetHits +
+                "; hitExtractionCutoff=" + this.HitExtractionCutoff +
+                "; dataMembersCalls=" + this.DataMembersCalls +
+                "; dataMembersMs=" + ToMilliseconds(this.dataMembersTicks) +
+                "; nameReads=" + this.NameReads +
+                "; nameMs=" + ToMilliseconds(this.nameTicks) +
+                "; valueReads=" + this.ValueReads +
+                "; valueMs=" + ToMilliseconds(this.valueTicks) +
+                "; typeReads=" + this.TypeReads +
+                "; typeMs=" + ToMilliseconds(this.typeTicks) +
+                "; expressionsAccessCalls=" + this.ExpressionsAccessCalls +
+                "; expressionsAccessMs=" + ToMilliseconds(this.expressionsAccessTicks) +
+                "; expressionsCountReads=" + this.ExpressionsCountReads +
+                "; expressionsCountMs=" + ToMilliseconds(this.expressionsCountTicks) +
+                "; expressionsEnumerationCalls=" + this.ExpressionsEnumerationCalls +
+                "; expressionsEnumerationMs=" + ToMilliseconds(this.expressionsEnumerationTicks) +
+                "; dataMembersCountReads=" + this.DataMembersCountReads +
+                "; dataMembersCountMs=" + ToMilliseconds(this.dataMembersCountTicks) +
+                "; dataMembersEnumerationCalls=" + this.DataMembersEnumerationCalls +
+                "; dataMembersEnumerationMs=" + ToMilliseconds(this.dataMembersEnumerationTicks);
+        }
+
+        public string ToRootTimingLogDetail()
+        {
+            if (this.rootTimings.Count == 0)
+            {
+                return "topSlowRoots=none";
+            }
+
+            var timings = new List<SnapshotRootTiming>(this.rootTimings);
+            timings.Sort((left, right) => right.TotalTicks.CompareTo(left.TotalTicks));
+
+            var builder = new StringBuilder("topSlowRoots=");
+            var count = Math.Min(5, timings.Count);
+            for (var index = 0; index < count; index++)
+            {
+                if (index > 0)
+                {
+                    builder.Append(" | ");
+                }
+
+                var timing = timings[index];
+                builder.Append(timing.SectionName);
+                builder.Append('/');
+                builder.Append(timing.RootName);
+                builder.Append(" totalMs=");
+                builder.Append(ToMilliseconds(timing.TotalTicks));
+                builder.Append(" scalarMs=");
+                builder.Append(ToMilliseconds(timing.ScalarTicks));
+                builder.Append(" expandMs=");
+                builder.Append(ToMilliseconds(timing.ExpansionTicks));
+            }
+
+            return builder.ToString();
+        }
+
+        public string ToAccountedTimeLogDetail(long totalExtractionTicks)
+        {
+            var accountedTicks = Math.Min(this.AccountedTicks, totalExtractionTicks);
+            var unaccountedTicks = Math.Max(0, totalExtractionTicks - accountedTicks);
+            return "totalExtractionMs=" + ToMilliseconds(totalExtractionTicks) +
+                "; accountedMs=" + ToMilliseconds(accountedTicks) +
+                "; unaccountedMs=" + ToMilliseconds(unaccountedTicks) +
+                "; accountedPercent=" + ToPercent(accountedTicks, totalExtractionTicks) +
+                "; unaccountedPercent=" + ToPercent(unaccountedTicks, totalExtractionTicks);
+        }
+
+        private static string ToMilliseconds(long elapsedTicks)
+        {
+            var milliseconds = elapsedTicks * 1000d / System.Diagnostics.Stopwatch.Frequency;
+            return milliseconds.ToString("0.###", CultureInfo.InvariantCulture);
+        }
+
+        private static string ToPercent(long valueTicks, long totalTicks)
+        {
+            if (totalTicks <= 0)
+            {
+                return "0";
+            }
+
+            var percent = valueTicks * 100d / totalTicks;
+            return percent.ToString("0.#", CultureInfo.InvariantCulture);
+        }
+
+        internal sealed class SnapshotRootTiming
+        {
+            public SnapshotRootTiming(string sectionName, string rootName, long scalarTicks)
+            {
+                this.SectionName = sectionName;
+                this.RootName = string.IsNullOrWhiteSpace(rootName) ? "<unnamed>" : rootName;
+                this.ScalarTicks = scalarTicks;
+            }
+
+            public string SectionName { get; }
+
+            public string RootName { get; }
+
+            public long ScalarTicks { get; }
+
+            public long ExpansionTicks { get; private set; }
+
+            public long TotalTicks => this.ScalarTicks + this.ExpansionTicks;
+
+            public void AddExpansion(long elapsedTicks)
+            {
+                this.ExpansionTicks += elapsedTicks;
+            }
+        }
     }
 }

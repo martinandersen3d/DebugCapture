@@ -26,6 +26,21 @@ internal sealed class PerformanceTimer : IDisposable
         return new PerformanceTimer(logger, operationName, detail);
     }
 
+    public static void LogMetric(IOutputWindowLogger logger, string operationName, string detail)
+    {
+        if (logger is null)
+        {
+            throw new ArgumentNullException(nameof(logger));
+        }
+
+        if (string.IsNullOrWhiteSpace(operationName))
+        {
+            return;
+        }
+
+        LogSafely(logger, FormatMetricMessage(operationName, detail));
+    }
+
     public long ElapsedMilliseconds => this.stopwatch.ElapsedMilliseconds;
 
     public void LogCheckpoint(string checkpointName)
@@ -35,7 +50,7 @@ internal sealed class PerformanceTimer : IDisposable
             return;
         }
 
-        this.LogSafely(FormatMessage(this.operationName + ":" + checkpointName, this.stopwatch.ElapsedMilliseconds, this.detail));
+        LogSafely(this.logger, FormatMessage(this.operationName + ":" + checkpointName, this.stopwatch.ElapsedMilliseconds, this.detail));
     }
 
     public void Dispose()
@@ -47,7 +62,7 @@ internal sealed class PerformanceTimer : IDisposable
 
         this.disposed = true;
         this.stopwatch.Stop();
-        this.LogSafely(FormatMessage(this.operationName, this.stopwatch.ElapsedMilliseconds, this.detail));
+        LogSafely(this.logger, FormatMessage(this.operationName, this.stopwatch.ElapsedMilliseconds, this.detail));
     }
 
     private static string FormatMessage(string operationName, long elapsedMilliseconds, string? detail)
@@ -61,7 +76,14 @@ internal sealed class PerformanceTimer : IDisposable
         return string.IsNullOrWhiteSpace(detail) ? message : message + " | " + detail;
     }
 
-    private void LogSafely(string message)
+    private static string FormatMetricMessage(string operationName, string detail)
+    {
+        return string.IsNullOrWhiteSpace(detail)
+            ? "[Perf] " + operationName
+            : "[Perf] " + operationName + " | " + detail;
+    }
+
+    private static void LogSafely(IOutputWindowLogger logger, string message)
     {
         try
         {
@@ -69,7 +91,7 @@ internal sealed class PerformanceTimer : IDisposable
             {
                 try
                 {
-                    await this.logger.LogAsync(message).ConfigureAwait(false);
+                    await logger.LogAsync(message).ConfigureAwait(false);
                 }
                 catch
                 {

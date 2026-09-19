@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Debug Capture Performance Report</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg: #101218;
+            --panel: #171b24;
+            --panel-2: #202635;
+            --text: #e8edf7;
+            --muted: #aeb8ca;
+            --accent: #6cb6ff;
+            --good: #57d68d;
+            --warn: #ffd166;
+            --bad: #ff6b6b;
+            --grid: rgba(255,255,255,.1);
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            background: radial-gradient(circle at top left, #202d44 0, var(--bg) 38rem);
+            color: var(--text);
+            font-family: "Segoe UI", Arial, sans-serif;
+            line-height: 1.55;
+        }
+
+        header, main {
+            max-width: 1180px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            padding-top: 3rem;
+            padding-bottom: 1rem;
+        }
+
+        h1, h2, h3 { line-height: 1.2; }
+        h1 { margin: 0 0 .5rem; font-size: 2.3rem; }
+        h2 { margin-top: 2.5rem; border-bottom: 1px solid var(--grid); padding-bottom: .5rem; }
+        h3 { margin-bottom: .5rem; }
+
+        .subtitle { color: var(--muted); max-width: 850px; }
+
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+            gap: 1rem;
+            margin: 1.5rem 0;
+        }
+
+        .card, .panel {
+            background: linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.015)), var(--panel);
+            border: 1px solid var(--grid);
+            border-radius: 14px;
+            box-shadow: 0 12px 35px rgba(0,0,0,.25);
+        }
+
+        .card { padding: 1.25rem; }
+        .panel { padding: 1.25rem; margin: 1rem 0; }
+
+        .metric { font-size: 2rem; font-weight: 700; letter-spacing: -.03em; }
+        .label { color: var(--muted); font-size: .95rem; }
+        .good { color: var(--good); }
+        .warn { color: var(--warn); }
+        .bad { color: var(--bad); }
+        .accent { color: var(--accent); }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+            overflow: hidden;
+            border-radius: 10px;
+        }
+
+        th, td {
+            padding: .75rem .85rem;
+            border-bottom: 1px solid var(--grid);
+            text-align: left;
+            vertical-align: top;
+        }
+
+        th { background: var(--panel-2); color: #fff; }
+        tr:last-child td { border-bottom: 0; }
+        tbody tr:hover { background: rgba(255,255,255,.035); }
+
+        .bar-chart { display: grid; gap: .75rem; margin: 1rem 0; }
+        .bar-row { display: grid; grid-template-columns: 190px 1fr 86px; gap: .75rem; align-items: center; }
+        .bar-label { color: var(--muted); }
+        .bar-track { background: rgba(255,255,255,.08); border-radius: 999px; height: 18px; overflow: hidden; }
+        .bar { height: 100%; border-radius: 999px; background: var(--accent); }
+        .bar.good { background: var(--good); }
+        .bar.warn { background: var(--warn); }
+        .bar.bad { background: var(--bad); }
+        .bar-value { text-align: right; font-variant-numeric: tabular-nums; }
+
+        .timeline {
+            display: grid;
+            gap: .6rem;
+            margin-top: 1rem;
+        }
+
+        .timeline-row {
+            display: grid;
+            grid-template-columns: 130px 1fr;
+            gap: .75rem;
+            align-items: center;
+        }
+
+        .timeline-track {
+            position: relative;
+            height: 28px;
+            background: rgba(255,255,255,.08);
+            border-radius: 7px;
+            overflow: hidden;
+        }
+
+        .segment {
+            position: absolute;
+            top: 0;
+            height: 100%;
+            border-radius: 7px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #081018;
+            font-size: .78rem;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .note {
+            color: var(--muted);
+            font-size: .94rem;
+        }
+
+        .callout {
+            border-left: 4px solid var(--accent);
+            padding: 1rem 1.2rem;
+            background: rgba(108,182,255,.08);
+            border-radius: 10px;
+            margin: 1rem 0;
+        }
+
+        .callout.warn { border-left-color: var(--warn); background: rgba(255,209,102,.08); color: var(--text); }
+        .callout.bad { border-left-color: var(--bad); background: rgba(255,107,107,.08); color: var(--text); }
+
+        code {
+            background: rgba(255,255,255,.09);
+            border: 1px solid var(--grid);
+            padding: .1rem .35rem;
+            border-radius: 5px;
+        }
+
+        ul { padding-left: 1.3rem; }
+        li { margin: .35rem 0; }
+    </style>
+</head>
+<body>
+<header>
+    <h1>Debug Capture Performance Report</h1>
+    <div class="subtitle">
+        Analysis of the supplied <strong>Debug Capture</strong> Output Window metrics from 2026-09-20 00:42:58 to 00:46:07.
+        This report summarizes capture time, snapshot extraction cost, root-level extraction timings, screenshot cost, aggregate extraction counters, file sizes, and likely bottlenecks.
+    </div>
+</header>
+
+<main>
+    <section class="cards">
+        <div class="card">
+            <div class="metric bad">1.69 s</div>
+            <div class="label">Average breakpoint capture, excluding two idle outliers</div>
+        </div>
+        <div class="card">
+            <div class="metric bad">1.29 s</div>
+            <div class="label">Average breakpoint debugger snapshot export</div>
+        </div>
+        <div class="card">
+            <div class="metric bad">515-1,690 ms</div>
+            <div class="label">Breakpoint DataMembers enumeration range</div>
+        </div>
+        <div class="card">
+            <div class="metric warn">297 ms</div>
+            <div class="label">Average screenshot capture/write</div>
+        </div>
+    </section>
+
+    <section>
+        <h2>Executive summary</h2>
+        <div class="callout bad">
+            <strong>Main bottleneck:</strong> debugger variable extraction through EnvDTE, specifically <strong>DataMembers enumeration</strong> while expanding the <strong>person</strong> and <strong>persons</strong> roots.
+            This usually consumes hundreds of milliseconds to more than 1.6 seconds per capture.
+        </div>
+        <div class="callout warn">
+            <strong>New insight:</strong> accounted extraction time is now about <strong>99.9% to 100%</strong>. The earlier missing time is now explained by collection/member enumeration, especially <code>DataMembers</code> traversal.
+        </div>
+        <div class="callout">
+            <strong>Working well:</strong> JSON serialization/write is tiny, scalar Name/Value/Type reads are tiny, per-root node budget is not being hit, and screenshots remain secondary to debugger extraction.
+        </div>
+    </section>
+
+    <section>
+        <h2>Capture statistics</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Metric</th>
+                    <th>Samples</th>
+                    <th>Average</th>
+                    <th>Min</th>
+                    <th>Max</th>
+                    <th>Notes</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Breakpoint total capture</td>
+                    <td>18</td>
+                    <td>1,867 ms including outliers<br>1,692 ms excluding two idle outliers</td>
+                    <td>773 ms</td>
+                    <td>3,324 ms</td>
+                    <td>Largest idle waits were 2,422 ms and 2,073 ms.</td>
+                </tr>
+                <tr>
+                    <td>Exception total capture</td>
+                    <td>3</td>
+                    <td>2,368 ms</td>
+                    <td>1,979 ms</td>
+                    <td>2,763 ms</td>
+                    <td>Exception summary is small; all exception captures hit the extraction cutoff.</td>
+                </tr>
+                <tr>
+                    <td>Breakpoint snapshot export</td>
+                    <td>18</td>
+                    <td>1,286 ms</td>
+                    <td>585 ms</td>
+                    <td>1,805 ms</td>
+                    <td>Almost all of this is DTE snapshot building, not JSON serialization/write.</td>
+                </tr>
+                <tr>
+                    <td>Exception snapshot export</td>
+                    <td>3</td>
+                    <td>1,625 ms</td>
+                    <td>1,586 ms</td>
+                    <td>1,697 ms</td>
+                    <td>Exception capture is still dominated by normal Locals extraction.</td>
+                </tr>
+                <tr>
+                    <td>Screenshot capture/write</td>
+                    <td>21</td>
+                    <td>297 ms breakpoint avg</td>
+                    <td>252 ms</td>
+                    <td>546 ms</td>
+                    <td>Stable and parallel with snapshot extraction; PNG sizes are around 232-305 KB.</td>
+                </tr>
+                <tr>
+                    <td>DataMembers enumeration</td>
+                    <td>18 breakpoint</td>
+                    <td>Dominant phase</td>
+                    <td>515 ms</td>
+                    <td>1,690 ms</td>
+                    <td>Explains nearly all debugger extraction time.</td>
+                </tr>
+                <tr>
+                    <td>Accounted extraction time</td>
+                    <td>All new captures</td>
+                    <td>99.9-100%</td>
+                    <td>99.9%</td>
+                    <td>100%</td>
+                    <td>The current instrumentation now explains the extraction bottleneck well.</td>
+                </tr>
+            </tbody>
+        </table>
+    </section>
+
+    <section>
+        <h2>Average phase comparison</h2>
+        <div class="panel">
+            <h3>Typical breakpoint capture, excluding first outlier</h3>
+            <div class="bar-chart">
+                <div class="bar-row">
+                    <div class="bar-label">Total capture</div>
+                    <div class="bar-track"><div class="bar bad" style="width:100%"></div></div>
+                    <div class="bar-value">1,692 ms</div>
+                </div>
+                <div class="bar-row">
+                    <div class="bar-label">Snapshot export</div>
+                    <div class="bar-track"><div class="bar bad" style="width:76%"></div></div>
+                    <div class="bar-value">1,286 ms</div>
+                </div>
+                <div class="bar-row">
+                    <div class="bar-label">DataMembers enum</div>
+                    <div class="bar-track"><div class="bar bad" style="width:75%"></div></div>
+                    <div class="bar-value">515-1,690 ms</div>
+                </div>
+                <div class="bar-row">
+                    <div class="bar-label">Screenshot</div>
+                    <div class="bar-track"><div class="bar warn" style="width:18%"></div></div>
+                    <div class="bar-value">297 ms</div>
+                </div>
+                <div class="bar-row">
+                    <div class="bar-label">Unaccounted</div>
+                    <div class="bar-track"><div class="bar good" style="width:.2%"></div></div>
+                    <div class="bar-value">~0.3-0.5 ms</div>
+                </div>
+            </div>
+            <p class="note">The screenshot and snapshot export run concurrently, so percentages are directional rather than additive.</p>
+        </div>
+    </section>
+
+    <section>
+        <h2>Capture timeline shape</h2>
+        <div class="panel">
+            <h3>Representative breakpoint capture around 1.8 seconds</h3>
+            <div class="timeline">
+                <div class="timeline-row">
+                    <div class="bar-label">UI idle wait</div>
+                    <div class="timeline-track"><div class="segment" style="left:0%; width:11%; background:var(--warn);">199 ms</div></div>
+                </div>
+                <div class="timeline-row">
+                    <div class="bar-label">Screenshot</div>
+                    <div class="timeline-track"><div class="segment" style="left:11%; width:15%; background:var(--accent);">258 ms</div></div>
+                </div>
+                <div class="timeline-row">
+                    <div class="bar-label">DTE snapshot</div>
+                    <div class="timeline-track"><div class="segment" style="left:11%; width:89%; background:var(--bad);">1,565 ms</div></div>
+                </div>
+                <div class="timeline-row">
+                    <div class="bar-label">JSON write</div>
+                    <div class="timeline-track"><div class="segment" style="left:99%; width:1%; background:var(--good);">~1 ms</div></div>
+                </div>
+            </div>
+            <p class="note">
+                The timeline shows why improving screenshot write speed will not materially change total capture time. The critical path is DTE snapshot extraction.
+            </p>
+        </div>
+    </section>
+
+    <section>
+        <h2>What is taking the time?</h2>
+        <div class="panel">
+            <h3>Debugger snapshot extraction</h3>
+            <ul>
+                <li><strong>Locals extraction is the dominant cost.</strong> The Locals checkpoint lands between <strong>571 ms and 1,783 ms</strong>.</li>
+                <li><strong>DataMembers enumeration is the real hot path.</strong> It ranges from about <strong>515 ms to 1,690 ms</strong> in breakpoint captures.</li>
+                <li><strong>Slow roots are consistent.</strong> <code>person</code> and <code>persons</code> dominate the slow-root summaries.</li>
+                <li><strong>Autos are cheap after Locals.</strong> The delta from Locals to Autos is typically only <strong>7-18 ms</strong>.</li>
+                <li><strong>CallStack is cheap.</strong> The delta after Autos is typically <strong>1-5 ms</strong>.</li>
+                <li><strong>Exception summary is acceptable.</strong> Exception message/stack trace extraction took <strong>61-115 ms</strong>.</li>
+                <li><strong>Extraction cutoff is real.</strong> Time budget was hit in <strong>9 of 18</strong> breakpoint captures and <strong>3 of 3</strong> exception captures.</li>
+                <li><strong>Per-root node budget is not active.</strong> It was never hit in this sample.</li>
+                <li><strong>Instrumentation now explains the time.</strong> Accounted extraction time is about <strong>99.9-100%</strong>.</li>
+                <li><strong>JSON serialization and file write are not the problem.</strong> Serialization and write usually add only a few milliseconds after the DTE snapshot is built.</li>
+            </ul>
+        </div>
+
+        <div class="panel">
+            <h3>Screenshot capture</h3>
+            <ul>
+                <li>Screenshot capture is consistent at roughly <strong>252-300 ms</strong> after warm-up, with one warm-up around <strong>546 ms</strong>.</li>
+                <li>Pixel capture/PNG encoding is almost the entire screenshot phase.</li>
+                <li>File writing adds only about <strong>1-8 ms</strong>.</li>
+                <li>PNG sizes are small, usually around <strong>232-305 KB</strong>.</li>
+                <li>Because screenshots run in parallel with snapshot export, this phase is usually hidden behind the slower DTE extraction.</li>
+            </ul>
+        </div>
+
+        <div class="panel">
+            <h3>Snapshot browser and detail window</h3>
+            <ul>
+                <li>The newest sample did not include snapshot browser refresh timings.</li>
+                <li>Prior data still indicates the selected snapshot detail tree is not the primary bottleneck.</li>
+                <li>JSON sizes are small, usually around <strong>18-26 KB</strong>.</li>
+            </ul>
+        </div>
+    </section>
+
+    <section>
+        <h2>Potential bottlenecks and recommendations</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Priority</th>
+                    <th>Area</th>
+                    <th>Evidence</th>
+                    <th>Recommendation</th>
+                    <th>Expected impact</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="bad"><strong>High</strong></td>
+                    <td>Locals expansion</td>
+                    <td><code>person</code> and <code>persons</code> consistently consume the majority of extraction time.</td>
+                    <td>Reduce or stage expansion for slow complex roots. Consider scalar-only first, then lazy/on-demand child expansion from the tool window.</td>
+                    <td>Largest improvement to breakpoint responsiveness.</td>
+                </tr>
+                <tr>
+                    <td class="bad"><strong>High</strong></td>
+                    <td>DataMembers enumeration</td>
+                    <td>DataMembers enumeration explains almost all extraction time.</td>
+                    <td>Add per-root time budgets and child enumeration caps so one root cannot consume almost the entire snapshot budget.</td>
+                    <td>Largest expected latency reduction.</td>
+                </tr>
+                <tr>
+                    <td class="warn"><strong>Medium</strong></td>
+                    <td>Debugger UI idle wait</td>
+                    <td>Largest idle waits were 2.4 s and 2.1 s.</td>
+                    <td>Add a bounded idle wait or timeout fallback. Log idle wait separately from capture work, and consider using a lower-priority delay only when required.</td>
+                    <td>Prevents long first-capture stalls and skipped captures.</td>
+                </tr>
+                <tr>
+                    <td class="warn"><strong>Medium</strong></td>
+                    <td>Snapshot browser refresh</td>
+                    <td>Not present in this sample.</td>
+                    <td>Keep previous JSON/browser refresh instrumentation and re-evaluate with future samples.</td>
+                    <td>Prevents losing visibility into UI scaling.</td>
+                </tr>
+                <tr>
+                    <td class="warn"><strong>Medium</strong></td>
+                    <td>Screenshot encoding</td>
+                    <td>Screenshot is stable but still roughly 252-300 ms after warm-up.</td>
+                    <td>Keep current behavior for now. Optimize only after DTE extraction is improved; possible options include lower compression or delayed encoding.</td>
+                    <td>Small to medium, because screenshot is usually not on the critical path.</td>
+                </tr>
+                <tr>
+                    <td class="good"><strong>Low</strong></td>
+                    <td>Detail tree rendering</td>
+                    <td>6-34 ms render time.</td>
+                    <td>No immediate action needed.</td>
+                    <td>Already good.</td>
+                </tr>
+            </tbody>
+        </table>
+    </section>
+
+    <section>
+        <h2>Data quality notes</h2>
+        <div class="panel">
+            <ul>
+                <li>The first breakpoint capture is a clear outlier: <strong>7,086 ms</strong>, mostly from <strong>6,031 ms</strong> waiting for debugger UI idle.</li>
+                <li>The logs are cumulative checkpoints, not exclusive phase durations. Exclusive phase durations were inferred by subtracting neighboring checkpoints.</li>
+                <li>Some lines appear out of order because performance logging is asynchronous. The elapsed numbers are still useful, but ordering in the Output window is not always strict.</li>
+                <li>The sample has only two exception captures, so exception conclusions should be treated as early evidence, not final statistics.</li>
+                <li>The new aggregate extraction metrics are useful, but they also prove more root-level traversal timing is needed.</li>
+            </ul>
+        </div>
+    </section>
+
+    <section>
+        <h2>Suggested next instrumentation</h2>
+        <div class="panel">
+            <ol>
+                <li>Keep the new aggregate timers for <code>GetSafeValue(Name)</code>, <code>GetSafeValue(Value)</code>, <code>GetSafeValue(Type)</code>, and <code>DataMembers</code>.</li>
+                <li>Add root-level timing for each Locals and Autos root and log the top slowest roots.</li>
+                <li>Add timing around <code>Expressions</code> and <code>DataMembers</code> collection enumeration itself.</li>
+                <li>Add an accounted-versus-unaccounted extraction time summary.</li>
+                <li>For the tool window, split refresh into: enumerate files, read JSON, deserialize JSON, sort list, update collection, select latest, rebuild detail tree, WPF layout/render delay.</li>
+            </ol>
+        </div>
+    </section>
+</main>
+</body>
+</html>

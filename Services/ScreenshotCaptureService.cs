@@ -44,6 +44,7 @@ internal sealed class ScreenshotCaptureService : IScreenshotCaptureService
 
             var pngBytes = CapturePngBytes(bounds);
             timer.LogCheckpoint("Pixels encoded");
+            PerformanceTimer.LogMetric(this.logger, "Screenshot PNG size " + fileSet.Trigger, "bytes=" + pngBytes.Length);
 
             await WriteFileAsync(fileSet.ImageFilePath, pngBytes).ConfigureAwait(false);
             timer.LogCheckpoint("File written");
