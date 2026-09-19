@@ -7,6 +7,7 @@ using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Threading;
@@ -89,6 +90,8 @@ internal sealed class SnapshotToolWindowViewModel : ObservableObject, IDisposabl
 
     public IEnumerable<SnapshotCallStackFrame>? CallStack => this.SelectedSnapshot?.CallStack;
 
+    public ObservableCollection<SnapshotDetailTreeNode> SnapshotDetails { get; } = new();
+
     public async Task InitializeAsync()
     {
         await this.RefreshAsync().ConfigureAwait(true);
@@ -146,6 +149,7 @@ internal sealed class SnapshotToolWindowViewModel : ObservableObject, IDisposabl
     {
         this.State.SelectedSnapshot = snapshot;
         this.State.SelectedIndex = snapshot is null ? -1 : this.State.Snapshots.IndexOf(snapshot);
+        this.RebuildSnapshotDetails();
         this.OnStateChanged();
         this.RaiseCommandStates();
     }
@@ -248,6 +252,110 @@ internal sealed class SnapshotToolWindowViewModel : ObservableObject, IDisposabl
         this.State.SelectedSnapshot = this.State.SelectedIndex >= 0 && this.State.SelectedIndex < this.State.Snapshots.Count
             ? this.State.Snapshots[this.State.SelectedIndex]
             : null;
+        this.RebuildSnapshotDetails();
+    }
+
+    private void RebuildSnapshotDetails()
+    {
+        this.SnapshotDetails.Clear();
+
+        var snapshot = this.SelectedSnapshot;
+        if (snapshot is null)
+        {
+            return;
+        }
+
+        this.SnapshotDetails.Add(CreatePropertyGroup("Locals", snapshot.Locals));
+        this.SnapshotDetails.Add(CreatePropertyGroup("Autos", snapshot.Autos));
+        this.SnapshotDetails.Add(CreatePropertyGroup("Watch 1", snapshot.Watch1));
+        this.SnapshotDetails.Add(CreatePropertyGroup("Watch 2", snapshot.Watch2));
+        this.SnapshotDetails.Add(CreatePropertyGroup("Watch 3", snapshot.Watch3));
+        this.SnapshotDetails.Add(CreatePropertyGroup("Watch 4", snapshot.Watch4));
+        this.SnapshotDetails.Add(CreateExceptionGroup(snapshot.Exception));
+        this.SnapshotDetails.Add(CreateCallStackGroup(snapshot.CallStack));
+    }
+
+    private static SnapshotDetailTreeNode CreatePropertyGroup(string name, IEnumerable<SnapshotProperty>? properties)
+    {
+        var group = new SnapshotDetailTreeNode { Name = name };
+        if (properties is null)
+        {
+            return group;
+        }
+
+        foreach (var property in properties)
+        {
+            group.Children.Add(CreatePropertyNode(property));
+        }
+
+        return group;
+    }
+
+    private static SnapshotDetailTreeNode CreatePropertyNode(SnapshotProperty property)
+    {
+        var node = new SnapshotDetailTreeNode
+        {
+            Name = property.Name,
+            Value = property.Value,
+            Type = property.Type,
+            SnapshotProperty = property,
+        };
+
+        if (property.Children is not null)
+        {
+            foreach (var child in property.Children)
+            {
+                node.Children.Add(CreatePropertyNode(child));
+            }
+        }
+
+        return node;
+    }
+
+    private static SnapshotDetailTreeNode CreateExceptionGroup(SnapshotException? exception)
+    {
+        var group = new SnapshotDetailTreeNode { Name = "Exception" };
+        if (exception is null)
+        {
+            return group;
+        }
+
+        group.Children.Add(new SnapshotDetailTreeNode { Name = "Message", Value = exception.Message, Type = "string" });
+        group.Children.Add(new SnapshotDetailTreeNode { Name = "StackTrace", Value = exception.StackTrace, Type = "string" });
+        return group;
+    }
+
+    private static SnapshotDetailTreeNode CreateCallStackGroup(IEnumerable<SnapshotCallStackFrame>? frames)
+    {
+        var group = new SnapshotDetailTreeNode { Name = "CallStack" };
+        if (frames is null)
+        {
+            return group;
+        }
+
+        foreach (var frame in frames)
+        {
+            group.Children.Add(new SnapshotDetailTreeNode
+            {
+                Name = frame.FunctionName,
+                Value = FormatCallStackLocation(frame),
+                Type = frame.Module,
+            });
+        }
+
+        return group;
+    }
+
+    private static string FormatCallStackLocation(SnapshotCallStackFrame frame)
+    {
+        if (string.IsNullOrEmpty(frame.File))
+        {
+            return string.Empty;
+        }
+
+        return frame.Line.HasValue
+            ? frame.File + ":" + frame.Line.Value
+            : frame.File;
     }
 
     private async Task OpenSelectedSourceAsync()

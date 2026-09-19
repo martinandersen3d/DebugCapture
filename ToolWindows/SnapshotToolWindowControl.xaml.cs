@@ -145,9 +145,20 @@ public partial class SnapshotToolWindowControl : UserControl, IDisposable
 
     private void TreeViewItem_ContextMenuOpening(object sender, ContextMenuEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: SnapshotProperty property } element)
+        if (sender is not FrameworkElement element)
         {
-            element.ContextMenu = this.contextMenuService.CreatePropertyContextMenu(property);
+            return;
+        }
+
+        switch (element.DataContext)
+        {
+            case SnapshotProperty property:
+                element.ContextMenu = this.contextMenuService.CreatePropertyContextMenu(property);
+                break;
+
+            case SnapshotDetailTreeNode { SnapshotProperty: not null } node:
+                element.ContextMenu = this.contextMenuService.CreatePropertyContextMenu(node.SnapshotProperty);
+                break;
         }
     }
 
