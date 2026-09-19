@@ -28,6 +28,7 @@ internal sealed class DebuggerBreakpointCaptureListener : IDisposable
     private CommandEvents? stepIntoCommandEvents;
     private CommandEvents? stepOverCommandEvents;
     private SnapshotTrigger? lastStepTrigger;
+    private int captureInProgress;
     private bool disposed;
 
     public DebuggerBreakpointCaptureListener(
@@ -101,6 +102,12 @@ internal sealed class DebuggerBreakpointCaptureListener : IDisposable
 
     private void QueueCapture(IntPtr windowHandle, SnapshotTrigger trigger)
     {
+        if (Interlocked.CompareExchange(ref this.captureInProgress, 1, 0) != 0)
+        {
+            this.joinableTaskFactory.RunAsync(() => this.LogCaptureSkippedAsync(trigger)).FileAndForget(TelemetryEventName);
+            return;
+        }
+
         this.joinableTaskFactory.RunAsync(() => this.CaptureWhenDebuggerUiIsReadyAsync(windowHandle, trigger)).FileAndForget(TelemetryEventName);
     }
 
@@ -118,6 +125,21 @@ internal sealed class DebuggerBreakpointCaptureListener : IDisposable
         catch (Exception exception)
         {
             await this.LogSafelyAsync(exception).ConfigureAwait(false);
+        }
+        finally
+        {
+            Interlocked.Exchange(ref this.captureInProgress, 0);
+        }
+    }
+
+    private async Task LogCaptureSkippedAsync(SnapshotTrigger trigger)
+    {
+        try
+        {
+            await this.logger.LogAsync("Skipped " + trigger + " capture because another capture is still running.").ConfigureAwait(false);
+        }
+        catch
+        {
         }
     }
 

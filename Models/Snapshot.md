@@ -43,7 +43,7 @@ The root object representing everything captured at a single debugger stop.
 | `Locals` | `List<SnapshotProperty>` | Variables from the debugger's **Locals** window at the time of capture. |
 | `Autos` | `List<SnapshotProperty>` | Variables from the debugger's **Autos** window (arguments and recently used expressions). |
 | `Watch1`–`Watch4` | `List<SnapshotProperty>` | Snapshots of up to four Watch windows. *(Note: not yet populated by the export service — reserved for future implementation.)* |
-| `Exception` | `SnapshotException` | Populated only when `Trigger == SnapshotTrigger.Exception`. Contains exception details (type, message, stack trace, members). See [`SnapshotException`](#snapshotexception) below. |
+| `Exception` | `SnapshotException` | Populated only when `Trigger == SnapshotTrigger.Exception`. Contains summary-first exception details (type, message, stack trace, and related scalar fields). See [`SnapshotException`](#snapshotexception) below. |
 | `CallStack` | `List<SnapshotCallStackFrame>` | The full call stack at the time of capture, ordered from innermost (current) frame outward. |
 | `Info` | `SnapshotInfo` | Session/environment context (project, solution, process, thread). See [`SnapshotInfo`](#snapshotinfo) below. |
 | `ImageFilePath` | `string` | Full path to the paired screenshot (`.png`) file for this snapshot, so a viewer/tool doesn't need to infer pairing purely from filename convention. |
@@ -73,6 +73,8 @@ A single name/value/type entry, used for Locals, Autos, Watches, and exception m
 | `Name` | `string` | The variable or member name (e.g. `i`, `user`, `Message`). |
 | `Value` | `string` | The evaluated value as a string. If evaluation fails, this may contain an `<error: ...>` placeholder rather than throwing, keeping capture fault-tolerant. |
 | `Type` | `string` | The declared or runtime type of the variable/member (e.g. `int`, `User`, `System.String`). |
+| `ChildrenTotalCount` | `int?` | Optional. Number of debugger children visible at snapshot time, when this can be read from `Expression.DataMembers.Count` within the extraction budget. |
+| `ChildrenSnapshotCount` | `int?` | Optional. Number of child nodes included in the JSON snapshot. If this is lower than `ChildrenTotalCount`, the child list is partial. |
 | `Children` | `List<SnapshotProperty>` | Optional. Populated only when this property represents an expandable/complex object whose members were also captured (e.g. nested object fields). `null` for simple/scalar values. |
 
 ---
@@ -90,8 +92,8 @@ Details about an exception, populated when `Snapshot.Trigger` is `Exception`. So
 | `HResult` | `string` | Native (Win32/COM) or CLR HRESULT value, when available. Exists in both managed and native contexts, though its meaning/format differs. |
 | `StackTrace` | `string` | Raw stack trace text. Format varies by language/runtime (.NET managed frames vs. native call stack vs. other runtimes), but the field itself is universal. |
 | `InnerException` | `SnapshotException` | **CLR-specific** recursive reference to a wrapped/chained exception (`Exception.InnerException`). `null` when there is no inner exception or the concept doesn't apply to the debugged language. |
-| `MembersTruncated` | `bool` | `true` when the `Members` list was cut off due to depth or count limits during capture (see `ExceptionMemberDepthLimit` / `ExceptionMemberCountLimit` in `DebuggerVariableExportService`), so consumers know the list isn't necessarily exhaustive. |
-| `Members` | `List<SnapshotProperty>` | Flattened/recursive dump of the exception object's data members (walks `Expression.DataMembers` via the debugger's expression evaluator), each entry potentially having its own `Children`. |
+| `MembersTruncated` | `bool` | `true` when exception member expansion was omitted or cut off by the extraction budget. Exception member expansion is disabled by default. |
+| `Members` | `List<SnapshotProperty>` | Optional exception members. Empty by default because exception capture is summary-first and does not expand the whole exception object graph. |
 
 ---
 

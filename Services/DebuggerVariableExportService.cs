@@ -6,7 +6,6 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
@@ -16,8 +15,7 @@ namespace DebugCapture.Services;
 internal sealed class DebuggerVariableExportService : IDebuggerVariableExportService
 {
     private const int FileBufferSize = 81920;
-    private const int MemberDepthLimit = 3;
-    private const int MemberCountLimit = 100;
+    private static readonly SnapshotExtractionOptions ExtractionOptions = new();
 
     private readonly DTE2 dte;
     private readonly JoinableTaskFactory joinableTaskFactory;
@@ -81,13 +79,15 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
             return snapshot;
         }
 
+        var budget = new SnapshotExtractionBudget(ExtractionOptions);
+
         if (fileSet.Trigger == SnapshotTrigger.Exception)
         {
-            snapshot.Exception = BuildException(this.dte.Debugger);
+            snapshot.Exception = BuildException(this.dte.Debugger, ExtractionOptions);
         }
 
-        snapshot.Locals = BuildExpressionList(() => stackFrame.Locals);
-        snapshot.Autos = BuildExpressionList(() => stackFrame.Arguments);
+        snapshot.Locals = BuildExpressionList(() => stackFrame.Locals, budget);
+        snapshot.Autos = BuildExpressionList(() => stackFrame.Arguments, budget);
         snapshot.CallStack = BuildCallStack(this.dte.Debugger?.CurrentThread?.StackFrames, stackFrame, snapshot);
 
         return snapshot;
@@ -104,12 +104,12 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         };
     }
 
-    private static SnapshotException BuildException(Debugger debugger)
+    private static SnapshotException BuildException(Debugger debugger, SnapshotExtractionOptions options)
     {
-        return BuildException(debugger, "$exception", 0);
+        return BuildException(debugger, "$exception", 0, options);
     }
 
-    private static SnapshotException BuildException(Debugger debugger, string expressionText, int depth)
+    private static SnapshotException BuildException(Debugger debugger, string expressionText, int depth, SnapshotExtractionOptions options)
     {
         var snapshotException = new SnapshotException();
 
@@ -122,33 +122,34 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
                 return snapshotException;
             }
 
-            snapshotException.TypeName = GetDebuggerExpressionValue(debugger, expressionText + ".GetType().FullName");
+            snapshotException.TypeName = TruncateValue(GetDebuggerExpressionValue(debugger, expressionText + ".GetType().FullName"), options.MaxValueLength);
             if (string.IsNullOrWhiteSpace(snapshotException.TypeName))
             {
-                snapshotException.TypeName = GetSafeValue(() => expression.Type);
+                snapshotException.TypeName = GetSafeValue(() => expression.Type, options.MaxValueLength);
             }
 
-            snapshotException.Message = GetDebuggerExpressionValue(debugger, expressionText + ".Message");
+            snapshotException.Message = TruncateValue(GetDebuggerExpressionValue(debugger, expressionText + ".Message"), options.MaxValueLength);
             if (string.IsNullOrWhiteSpace(snapshotException.Message))
             {
-                snapshotException.Message = GetSafeValue(() => expression.Value);
+                snapshotException.Message = GetSafeValue(() => expression.Value, options.MaxValueLength);
             }
 
-            snapshotException.Source = GetDebuggerExpressionValue(debugger, expressionText + ".Source");
-            snapshotException.TargetSite = GetDebuggerExpressionValue(debugger, expressionText + ".TargetSite");
-            snapshotException.HResult = GetDebuggerExpressionValue(debugger, expressionText + ".HResult");
-            snapshotException.StackTrace = GetDebuggerExpressionValue(debugger, expressionText + ".StackTrace");
+            snapshotException.Source = TruncateValue(GetDebuggerExpressionValue(debugger, expressionText + ".Source"), options.MaxValueLength);
+            snapshotException.TargetSite = TruncateValue(GetDebuggerExpressionValue(debugger, expressionText + ".TargetSite"), options.MaxValueLength);
+            snapshotException.HResult = TruncateValue(GetDebuggerExpressionValue(debugger, expressionText + ".HResult"), options.MaxValueLength);
+            snapshotException.StackTrace = TruncateValue(GetDebuggerExpressionValue(debugger, expressionText + ".StackTrace"), options.MaxValueLength);
 
-            var counter = new SnapshotMemberCounter();
-            snapshotException.Members = BuildExpressionMembers(expression, 0, counter);
-            snapshotException.MembersTruncated = counter.Truncated;
+            if (options.MaxExceptionMembers <= 0)
+            {
+                snapshotException.MembersTruncated = true;
+            }
 
-            if (depth < MemberDepthLimit)
+            if (depth < options.MaxDepth)
             {
                 var innerException = TryGetExpression(debugger, expressionText + ".InnerException");
-                if (innerException is not null && innerException.IsValidValue && !string.Equals(GetSafeValue(() => innerException.Value), "null", StringComparison.OrdinalIgnoreCase))
+                if (innerException is not null && innerException.IsValidValue && !string.Equals(GetSafeValue(() => innerException.Value, options.MaxValueLength), "null", StringComparison.OrdinalIgnoreCase))
                 {
-                    snapshotException.InnerException = BuildException(debugger, expressionText + ".InnerException", depth + 1);
+                    snapshotException.InnerException = BuildException(debugger, expressionText + ".InnerException", depth + 1, options);
                 }
             }
         }
@@ -211,7 +212,7 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         return frames;
     }
 
-    private static List<SnapshotProperty> BuildExpressionList(Func<Expressions> expressionsFactory)
+    private static List<SnapshotProperty> BuildExpressionList(Func<Expressions> expressionsFactory, SnapshotExtractionBudget budget)
     {
         var properties = new List<SnapshotProperty>();
 
@@ -223,10 +224,18 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
                 return properties;
             }
 
-            var counter = new SnapshotMemberCounter();
             foreach (Expression expression in expressions)
             {
-                properties.Add(BuildSnapshotProperty(expression, 0, counter));
+                if (budget.IsExhausted)
+                {
+                    return properties;
+                }
+
+                var property = BuildSnapshotProperty(expression, 0, budget);
+                if (property is not null)
+                {
+                    properties.Add(property);
+                }
             }
         }
         catch (Exception exception)
@@ -234,34 +243,48 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
             properties.Add(new SnapshotProperty
             {
                 Name = "Section",
-                Value = "<error: Unable to read section: " + exception.Message + ">",
+                Value = TruncateValue("<error: Unable to read section: " + exception.Message + ">", budget.Options.MaxValueLength),
             });
         }
 
         return properties;
     }
 
-    private static List<SnapshotProperty> BuildExpressionMembers(Expression expression, int depth, SnapshotMemberCounter counter)
+    private static List<SnapshotProperty> BuildExpressionMembers(Expression expression, int depth, SnapshotExtractionBudget budget, out int? childrenTotalCount)
     {
         var children = new List<SnapshotProperty>();
+        childrenTotalCount = null;
 
         try
         {
+            if (budget.IsExhausted || depth >= budget.Options.MaxDepth)
+            {
+                return children;
+            }
+
             var dataMembers = expression.DataMembers;
             if (dataMembers is null || dataMembers.Count == 0)
             {
                 return children;
             }
 
+            childrenTotalCount = dataMembers.Count;
+            var capturedChildren = 0;
             foreach (Expression member in dataMembers)
             {
-                if (counter.Count >= MemberCountLimit)
+                if (budget.IsExhausted || capturedChildren >= budget.Options.MaxChildrenPerNode)
                 {
-                    counter.Truncated = true;
                     return children;
                 }
 
-                children.Add(BuildSnapshotProperty(member, depth + 1, counter));
+                var child = BuildSnapshotProperty(member, depth + 1, budget);
+                if (child is null)
+                {
+                    return children;
+                }
+
+                children.Add(child);
+                capturedChildren++;
             }
         }
         catch (Exception exception)
@@ -269,34 +292,42 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
             children.Add(new SnapshotProperty
             {
                 Name = "Members",
-                Value = "<error: Unable to read members: " + exception.Message + ">",
+                Value = TruncateValue("<error: Unable to read members: " + exception.Message + ">", budget.Options.MaxValueLength),
             });
         }
 
         return children;
     }
 
-    private static SnapshotProperty BuildSnapshotProperty(Expression expression, int depth, SnapshotMemberCounter counter)
+    private static SnapshotProperty? BuildSnapshotProperty(Expression expression, int depth, SnapshotExtractionBudget budget)
     {
-        counter.Count++;
+        if (!budget.TryConsumeNode())
+        {
+            return null;
+        }
+
         var property = new SnapshotProperty
         {
-            Name = GetSafeValue(() => expression.Name),
-            Value = GetSafeValue(() => expression.Value),
-            Type = GetSafeValue(() => expression.Type),
+            Name = GetSafeValue(() => expression.Name, budget.Options.MaxValueLength),
+            Value = GetSafeValue(() => expression.Value, budget.Options.MaxValueLength),
+            Type = GetSafeValue(() => expression.Type, budget.Options.MaxValueLength),
         };
 
-        if (depth >= MemberDepthLimit)
+        if (depth >= budget.Options.MaxDepth || budget.IsExhausted)
         {
-            counter.Truncated = true;
+            return property;
         }
-        else
+
+        var children = BuildExpressionMembers(expression, depth, budget, out var childrenTotalCount);
+        if (childrenTotalCount.HasValue)
         {
-            var children = BuildExpressionMembers(expression, depth, counter);
-            if (children.Count > 0)
-            {
-                property.Children = children;
-            }
+            property.ChildrenTotalCount = childrenTotalCount;
+            property.ChildrenSnapshotCount = children.Count;
+        }
+
+        if (children.Count > 0)
+        {
+            property.Children = children;
         }
 
         return property;
@@ -312,6 +343,21 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         {
             return "<error: " + exception.Message + ">";
         }
+    }
+
+    private static string GetSafeValue(Func<string> valueFactory, int maxLength)
+    {
+        return TruncateValue(GetSafeValue(valueFactory), maxLength);
+    }
+
+    private static string TruncateValue(string value, int maxLength)
+    {
+        if (string.IsNullOrEmpty(value) || maxLength <= 0 || value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        return value.Substring(0, maxLength) + "... <SnapshotCutoff:10.000Chars>";
     }
 
     private static string GetActiveDocumentRelativeFolder(DTE2 dte)
@@ -400,10 +446,49 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         }
     }
 
-    private sealed class SnapshotMemberCounter
+    private sealed class SnapshotExtractionOptions
     {
-        public int Count { get; set; }
+        public int MaxDepth { get; set; } = 3;
 
-        public bool Truncated { get; set; }
+        public int MaxChildrenPerNode { get; set; } = 100;
+
+        public int MaxTotalNodes { get; set; } = 2000;
+
+        public int MaxValueLength { get; set; } = 10000;
+
+        public int MaxExtractionMilliseconds { get; set; } = 1500;
+
+        public int MaxExceptionMembers { get; set; }
+    }
+
+    private sealed class SnapshotExtractionBudget
+    {
+        private readonly System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        public SnapshotExtractionBudget(SnapshotExtractionOptions options)
+        {
+            this.Options = options ?? throw new ArgumentNullException(nameof(options));
+        }
+
+        public SnapshotExtractionOptions Options { get; }
+
+        public int CapturedNodes { get; private set; }
+
+        public bool IsNodeBudgetExhausted => this.CapturedNodes >= this.Options.MaxTotalNodes;
+
+        public bool IsTimeBudgetExhausted => this.stopwatch.ElapsedMilliseconds >= this.Options.MaxExtractionMilliseconds;
+
+        public bool IsExhausted => this.IsNodeBudgetExhausted || this.IsTimeBudgetExhausted;
+
+        public bool TryConsumeNode()
+        {
+            if (this.IsExhausted)
+            {
+                return false;
+            }
+
+            this.CapturedNodes++;
+            return true;
+        }
     }
 }

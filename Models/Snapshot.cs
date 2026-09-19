@@ -83,6 +83,10 @@ public class SnapshotProperty
 
     public string Type { get; set; }
 
+    public int? ChildrenTotalCount { get; set; }
+
+    public int? ChildrenSnapshotCount { get; set; }
+
     /// <summary>
     /// Nested members, populated only when this property represents an expandable/complex object.
     /// </summary>
