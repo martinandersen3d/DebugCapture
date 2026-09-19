@@ -3,6 +3,7 @@ using DebugCapture.Services;
 using System;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 
 namespace DebugCapture.ToolWindows;
 
@@ -10,6 +11,7 @@ public partial class SnapshotToolWindowControl : UserControl, IDisposable
 {
     private readonly SnapshotToolWindowViewModel viewModel = new();
     private readonly SnapshotContextMenuService contextMenuService = new();
+    private ListView? snapshotListView;
     private bool isSynchronizingSelection;
     private bool disposed;
 
@@ -71,12 +73,15 @@ public partial class SnapshotToolWindowControl : UserControl, IDisposable
         this.isSynchronizingSelection = true;
         try
         {
-            this.viewModel.SelectSnapshot((sender as ListView)?.SelectedItem as SnapshotListItem);
+            this.snapshotListView = sender as ListView;
+            this.viewModel.SelectSnapshot(this.snapshotListView?.SelectedItem as SnapshotListItem);
         }
         finally
         {
             this.isSynchronizingSelection = false;
         }
+
+        this.ScrollSelectedSnapshotIntoView();
     }
 
     private void SnapshotSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -95,6 +100,8 @@ public partial class SnapshotToolWindowControl : UserControl, IDisposable
         {
             this.isSynchronizingSelection = false;
         }
+
+        this.ScrollSelectedSnapshotIntoView();
     }
 
     private void OpenSource_Click(object sender, RoutedEventArgs e)
@@ -121,6 +128,33 @@ public partial class SnapshotToolWindowControl : UserControl, IDisposable
         {
             this.viewModel.OpenInExplorerCommand.Execute(null);
         }
+    }
+
+    private void ScrollSelectedSnapshotIntoView()
+    {
+        if (this.viewModel.State.SelectedSnapshot is not null && this.snapshotListView is not null)
+        {
+            this.snapshotListView.ScrollIntoView(this.viewModel.State.SelectedSnapshot);
+        }
+    }
+
+    private void SnapshotDetailsScrollViewer_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (sender is not ScrollViewer scrollViewer)
+        {
+            return;
+        }
+
+        if (e.Delta < 0)
+        {
+            scrollViewer.LineDown();
+        }
+        else
+        {
+            scrollViewer.LineUp();
+        }
+
+        e.Handled = true;
     }
 
     private void ListViewItem_ContextMenuOpening(object sender, ContextMenuEventArgs e)

@@ -22,6 +22,7 @@ internal sealed class SnapshotToolWindowViewModel : ObservableObject, IDisposabl
 {
     private readonly SnapshotRepository repository;
     private readonly ICaptureNotificationService notificationService;
+    private readonly HashSet<string> expandedSnapshotDetailKeys = new(StringComparer.Ordinal);
     private CancellationTokenSource? refreshCancellationTokenSource;
     private bool disposed;
     private bool isWindowVisible;
@@ -168,6 +169,7 @@ internal sealed class SnapshotToolWindowViewModel : ObservableObject, IDisposabl
             this.State.SelectedSnapshot = this.State.Snapshots[boundedIndex];
         }
 
+        this.RebuildSnapshotDetails();
         this.OnStateChanged();
         this.RaiseCommandStates();
     }
@@ -265,19 +267,49 @@ internal sealed class SnapshotToolWindowViewModel : ObservableObject, IDisposabl
             return;
         }
 
-        this.SnapshotDetails.Add(CreatePropertyGroup("Locals", snapshot.Locals));
-        this.SnapshotDetails.Add(CreatePropertyGroup("Autos", snapshot.Autos));
-        this.SnapshotDetails.Add(CreatePropertyGroup("Watch 1", snapshot.Watch1));
-        this.SnapshotDetails.Add(CreatePropertyGroup("Watch 2", snapshot.Watch2));
-        this.SnapshotDetails.Add(CreatePropertyGroup("Watch 3", snapshot.Watch3));
-        this.SnapshotDetails.Add(CreatePropertyGroup("Watch 4", snapshot.Watch4));
-        this.SnapshotDetails.Add(CreateExceptionGroup(snapshot.Exception));
-        this.SnapshotDetails.Add(CreateCallStackGroup(snapshot.CallStack));
+        this.SnapshotDetails.Add(this.InitializeNodeExpansion(CreatePropertyGroup("Locals", "Locals", snapshot.Locals)));
+        this.SnapshotDetails.Add(this.InitializeNodeExpansion(CreatePropertyGroup("Autos", "Autos", snapshot.Autos)));
+        this.SnapshotDetails.Add(this.InitializeNodeExpansion(CreatePropertyGroup("Watch 1", "Watch 1", snapshot.Watch1)));
+        this.SnapshotDetails.Add(this.InitializeNodeExpansion(CreatePropertyGroup("Watch 2", "Watch 2", snapshot.Watch2)));
+        this.SnapshotDetails.Add(this.InitializeNodeExpansion(CreatePropertyGroup("Watch 3", "Watch 3", snapshot.Watch3)));
+        this.SnapshotDetails.Add(this.InitializeNodeExpansion(CreatePropertyGroup("Watch 4", "Watch 4", snapshot.Watch4)));
+        this.SnapshotDetails.Add(this.InitializeNodeExpansion(CreateExceptionGroup(snapshot.Exception)));
+        this.SnapshotDetails.Add(this.InitializeNodeExpansion(CreateCallStackGroup(snapshot.CallStack)));
     }
 
-    private static SnapshotDetailTreeNode CreatePropertyGroup(string name, IEnumerable<SnapshotProperty>? properties)
+    private SnapshotDetailTreeNode InitializeNodeExpansion(SnapshotDetailTreeNode node)
     {
-        var group = new SnapshotDetailTreeNode { Name = name };
+        node.IsExpanded = this.expandedSnapshotDetailKeys.Contains(node.ExpansionKey);
+        node.ExpansionChanged = this.OnSnapshotDetailNodeExpansionChanged;
+
+        foreach (var child in node.Children)
+        {
+            this.InitializeNodeExpansion(child);
+        }
+
+        return node;
+    }
+
+    private void OnSnapshotDetailNodeExpansionChanged(SnapshotDetailTreeNode node)
+    {
+        if (string.IsNullOrEmpty(node.ExpansionKey))
+        {
+            return;
+        }
+
+        if (node.IsExpanded)
+        {
+            this.expandedSnapshotDetailKeys.Add(node.ExpansionKey);
+        }
+        else
+        {
+            this.expandedSnapshotDetailKeys.Remove(node.ExpansionKey);
+        }
+    }
+
+    private static SnapshotDetailTreeNode CreatePropertyGroup(string name, string expansionKey, IEnumerable<SnapshotProperty>? properties)
+    {
+        var group = new SnapshotDetailTreeNode { Name = name, ExpansionKey = expansionKey };
         if (properties is null)
         {
             return group;
@@ -285,19 +317,21 @@ internal sealed class SnapshotToolWindowViewModel : ObservableObject, IDisposabl
 
         foreach (var property in properties)
         {
-            group.Children.Add(CreatePropertyNode(property));
+            group.Children.Add(CreatePropertyNode(property, expansionKey));
         }
 
         return group;
     }
 
-    private static SnapshotDetailTreeNode CreatePropertyNode(SnapshotProperty property)
+    private static SnapshotDetailTreeNode CreatePropertyNode(SnapshotProperty property, string parentKey)
     {
+        var expansionKey = CombineExpansionKey(parentKey, property.Name);
         var node = new SnapshotDetailTreeNode
         {
             Name = property.Name,
             Value = property.Value,
             Type = property.Type,
+            ExpansionKey = expansionKey,
             SnapshotProperty = property,
         };
 
@@ -305,7 +339,7 @@ internal sealed class SnapshotToolWindowViewModel : ObservableObject, IDisposabl
         {
             foreach (var child in property.Children)
             {
-                node.Children.Add(CreatePropertyNode(child));
+                node.Children.Add(CreatePropertyNode(child, expansionKey));
             }
         }
 
@@ -314,20 +348,20 @@ internal sealed class SnapshotToolWindowViewModel : ObservableObject, IDisposabl
 
     private static SnapshotDetailTreeNode CreateExceptionGroup(SnapshotException? exception)
     {
-        var group = new SnapshotDetailTreeNode { Name = "Exception" };
+        var group = new SnapshotDetailTreeNode { Name = "Exception", ExpansionKey = "Exception" };
         if (exception is null)
         {
             return group;
         }
 
-        group.Children.Add(new SnapshotDetailTreeNode { Name = "Message", Value = exception.Message, Type = "string" });
-        group.Children.Add(new SnapshotDetailTreeNode { Name = "StackTrace", Value = exception.StackTrace, Type = "string" });
+        group.Children.Add(new SnapshotDetailTreeNode { Name = "Message", Value = exception.Message, Type = "string", ExpansionKey = "Exception/Message" });
+        group.Children.Add(new SnapshotDetailTreeNode { Name = "StackTrace", Value = exception.StackTrace, Type = "string", ExpansionKey = "Exception/StackTrace" });
         return group;
     }
 
     private static SnapshotDetailTreeNode CreateCallStackGroup(IEnumerable<SnapshotCallStackFrame>? frames)
     {
-        var group = new SnapshotDetailTreeNode { Name = "CallStack" };
+        var group = new SnapshotDetailTreeNode { Name = "CallStack", ExpansionKey = "CallStack" };
         if (frames is null)
         {
             return group;
@@ -335,11 +369,13 @@ internal sealed class SnapshotToolWindowViewModel : ObservableObject, IDisposabl
 
         foreach (var frame in frames)
         {
+            var frameName = frame.FunctionName ?? string.Empty;
             group.Children.Add(new SnapshotDetailTreeNode
             {
-                Name = frame.FunctionName,
+                Name = frameName,
                 Value = FormatCallStackLocation(frame),
                 Type = frame.Module,
+                ExpansionKey = CombineExpansionKey("CallStack", frameName),
             });
         }
 
@@ -356,6 +392,11 @@ internal sealed class SnapshotToolWindowViewModel : ObservableObject, IDisposabl
         return frame.Line.HasValue
             ? frame.File + ":" + frame.Line.Value
             : frame.File;
+    }
+
+    private static string CombineExpansionKey(string parentKey, string? name)
+    {
+        return parentKey + "/" + (name ?? string.Empty);
     }
 
     private async Task OpenSelectedSourceAsync()
