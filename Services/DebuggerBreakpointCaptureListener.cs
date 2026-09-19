@@ -113,14 +113,22 @@ internal sealed class DebuggerBreakpointCaptureListener : IDisposable
 
     private async Task CaptureWhenDebuggerUiIsReadyAsync(IntPtr windowHandle, SnapshotTrigger trigger)
     {
+        using var timer = PerformanceTimer.Start(this.logger, "Capture " + trigger);
+
         try
         {
             await this.WaitForDebuggerUiRenderAsync().ConfigureAwait(true);
+            timer.LogCheckpoint("Debugger UI idle");
+
             var fileSet = this.captureFilePathProvider.CreateFileSet(trigger);
+            timer.LogCheckpoint("File paths ready");
+
             var screenshotTask = this.screenshotCaptureService.CaptureAsync(windowHandle, fileSet);
             var variablesTask = this.variableExportService.ExportAsync(fileSet);
+            timer.LogCheckpoint("Capture tasks started");
 
             await Task.WhenAll(screenshotTask, variablesTask).ConfigureAwait(false);
+            timer.LogCheckpoint("Capture tasks completed");
         }
         catch (Exception exception)
         {

@@ -43,12 +43,21 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
             throw new ArgumentNullException(nameof(fileSet));
         }
 
+        using var timer = PerformanceTimer.Start(this.logger, "Snapshot export " + fileSet.Trigger);
+
         try
         {
             var snapshot = await this.BuildSnapshotAsync(fileSet).ConfigureAwait(true);
+            timer.LogCheckpoint("DTE snapshot built");
+
             var content = JsonConvert.SerializeObject(snapshot, JsonSerializerSettings);
+            timer.LogCheckpoint("JSON serialized");
+
             await Task.Run(() => WriteFileAsync(fileSet.VariablesFilePath, content)).ConfigureAwait(false);
+            timer.LogCheckpoint("JSON file written");
+
             this.notificationService.NotifyCaptureCompleted(fileSet.VariablesFilePath);
+            timer.LogCheckpoint("Notification sent");
         }
         catch (Exception exception)
         {
@@ -58,7 +67,10 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
 
     private async Task<Snapshot> BuildSnapshotAsync(CaptureFileSet fileSet)
     {
+        using var timer = PerformanceTimer.Start(this.logger, "Build snapshot " + fileSet.Trigger);
+
         await this.joinableTaskFactory.SwitchToMainThreadAsync();
+        timer.LogCheckpoint("Main thread");
 
         var snapshot = new Snapshot
         {
@@ -72,6 +84,7 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
             LineText = GetActiveDocumentLineText(this.dte),
             Info = BuildSnapshotInfo(this.dte),
         };
+        timer.LogCheckpoint("Header");
 
         var stackFrame = this.dte.Debugger?.CurrentStackFrame;
         if (stackFrame is null)
@@ -84,12 +97,18 @@ internal sealed class DebuggerVariableExportService : IDebuggerVariableExportSer
         if (fileSet.Trigger == SnapshotTrigger.Exception)
         {
             snapshot.Exception = BuildException(this.dte.Debugger, ExtractionOptions);
+            timer.LogCheckpoint("Exception summary");
         }
 
         var isExceptionCapture = fileSet.Trigger == SnapshotTrigger.Exception;
         snapshot.Locals = BuildExpressionList(() => stackFrame.Locals, extractionClock, isExceptionCapture);
+        timer.LogCheckpoint("Locals");
+
         snapshot.Autos = BuildExpressionList(() => stackFrame.Arguments, extractionClock, isExceptionCapture);
+        timer.LogCheckpoint("Autos");
+
         snapshot.CallStack = BuildCallStack(this.dte.Debugger?.CurrentThread?.StackFrames, stackFrame, snapshot);
+        timer.LogCheckpoint("CallStack");
 
         return snapshot;
     }

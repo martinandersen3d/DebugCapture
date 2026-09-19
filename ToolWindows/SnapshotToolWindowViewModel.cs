@@ -22,20 +22,22 @@ internal sealed class SnapshotToolWindowViewModel : ObservableObject, IDisposabl
 {
     private readonly SnapshotRepository repository;
     private readonly ICaptureNotificationService notificationService;
+    private readonly IOutputWindowLogger? logger;
     private readonly HashSet<string> expandedSnapshotDetailKeys = new(StringComparer.Ordinal);
     private CancellationTokenSource? refreshCancellationTokenSource;
     private bool disposed;
     private bool isWindowVisible;
 
     public SnapshotToolWindowViewModel()
-        : this(new SnapshotRepository(), CaptureNotificationService.Shared)
+        : this(new SnapshotRepository(DebugCapturePackage.OutputLogger), CaptureNotificationService.Shared, DebugCapturePackage.OutputLogger)
     {
     }
 
-    public SnapshotToolWindowViewModel(SnapshotRepository repository, ICaptureNotificationService notificationService)
+    public SnapshotToolWindowViewModel(SnapshotRepository repository, ICaptureNotificationService notificationService, IOutputWindowLogger? logger = null)
     {
         this.repository = repository ?? throw new ArgumentNullException(nameof(repository));
         this.notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
+        this.logger = logger;
         this.RefreshCommand = new AsyncRelayCommand(this.RefreshAsync);
         this.FirstCommand = new RelayCommand(this.SelectFirst, () => this.State.Snapshots.Count > 0);
         this.PreviousCommand = new RelayCommand(this.SelectPrevious, () => this.State.SelectedIndex > 0);
@@ -122,7 +124,9 @@ internal sealed class SnapshotToolWindowViewModel : ObservableObject, IDisposabl
 
         try
         {
+            using var timer = this.logger is null ? null : PerformanceTimer.Start(this.logger, "Refresh snapshot tool window");
             var snapshots = await this.repository.LoadSnapshotsAsync(cancellationToken).ConfigureAwait(true);
+            timer?.LogCheckpoint("JSON loaded");
             cancellationToken.ThrowIfCancellationRequested();
 
             this.State.Snapshots.Clear();
@@ -133,6 +137,7 @@ internal sealed class SnapshotToolWindowViewModel : ObservableObject, IDisposabl
 
             this.State.SelectedIndex = this.State.Snapshots.Count > 0 ? this.State.Snapshots.Count - 1 : -1;
             this.SyncSelectedSnapshotFromIndex();
+            timer?.LogCheckpoint("Snapshot list and detail shown");
             this.State.StatusMessage = this.State.Snapshots.Count == 0
                 ? "No snapshots found in " + this.repository.SnapshotDirectory
                 : this.State.Snapshots.Count + " snapshots loaded";
@@ -273,6 +278,7 @@ internal sealed class SnapshotToolWindowViewModel : ObservableObject, IDisposabl
 
     private void RebuildSnapshotDetails()
     {
+        using var timer = this.logger is null ? null : PerformanceTimer.Start(this.logger, "Build snapshot detail tree");
         this.SnapshotDetails.Clear();
 
         var snapshot = this.SelectedSnapshot;
@@ -289,6 +295,7 @@ internal sealed class SnapshotToolWindowViewModel : ObservableObject, IDisposabl
         this.SnapshotDetails.Add(this.InitializeNodeExpansion(CreatePropertyGroup("Watch 4", "Watch 4", snapshot.Watch4)));
         this.SnapshotDetails.Add(this.InitializeNodeExpansion(CreateExceptionGroup(snapshot.Exception)));
         this.SnapshotDetails.Add(this.InitializeNodeExpansion(CreateCallStackGroup(snapshot.CallStack)));
+        timer?.LogCheckpoint("Detail nodes: " + this.SnapshotDetails.Count);
     }
 
     private SnapshotDetailTreeNode InitializeNodeExpansion(SnapshotDetailTreeNode node)

@@ -31,6 +31,8 @@ internal sealed class ScreenshotCaptureService : IScreenshotCaptureService
 
     private async Task CaptureCoreAsync(IntPtr windowHandle, CaptureFileSet fileSet)
     {
+        using var timer = PerformanceTimer.Start(this.logger, "Screenshot " + fileSet.Trigger);
+
         try
         {
             if (!this.boundsProvider.TryGetWindowBounds(windowHandle, out var bounds))
@@ -38,11 +40,16 @@ internal sealed class ScreenshotCaptureService : IScreenshotCaptureService
                 await this.LogSafelyAsync("Unable to determine Visual Studio window bounds.").ConfigureAwait(false);
                 return;
             }
+            timer.LogCheckpoint("Bounds");
 
             var pngBytes = CapturePngBytes(bounds);
+            timer.LogCheckpoint("Pixels encoded");
+
             await WriteFileAsync(fileSet.ImageFilePath, pngBytes).ConfigureAwait(false);
+            timer.LogCheckpoint("File written");
 
             this.notificationService.NotifyCaptureCompleted(fileSet.ImageFilePath);
+            timer.LogCheckpoint("Notification sent");
         }
         catch (Exception exception)
         {

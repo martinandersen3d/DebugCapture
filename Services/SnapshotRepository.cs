@@ -12,6 +12,12 @@ namespace DebugCapture.Services;
 internal sealed class SnapshotRepository
 {
     private const int FileBufferSize = 81920;
+    private readonly IOutputWindowLogger? logger;
+
+    public SnapshotRepository(IOutputWindowLogger? logger = null)
+    {
+        this.logger = logger;
+    }
 
     public string SnapshotDirectory => GetSnapshotDirectory();
 
@@ -23,7 +29,10 @@ internal sealed class SnapshotRepository
             return Array.Empty<SnapshotListItem>();
         }
 
-        return await Task.Run(() => LoadSnapshots(directory, cancellationToken), cancellationToken).ConfigureAwait(false);
+        using var timer = this.logger is null ? null : PerformanceTimer.Start(this.logger, "Load JSON snapshots", directory);
+        var snapshots = await Task.Run(() => LoadSnapshots(directory, cancellationToken), cancellationToken).ConfigureAwait(false);
+        timer?.LogCheckpoint("Files deserialized: " + snapshots.Count);
+        return snapshots;
     }
 
     private static IReadOnlyList<SnapshotListItem> LoadSnapshots(string directory, CancellationToken cancellationToken)

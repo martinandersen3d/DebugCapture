@@ -45,6 +45,8 @@ public sealed class DebugCapturePackage : AsyncPackage
     private OutputWindowLogger? logger;
     private DebuggerBreakpointCaptureListener? breakpointCaptureListener;
 
+    internal static IOutputWindowLogger? OutputLogger { get; private set; }
+
     #region Package Members
 
     /// <summary>
@@ -60,6 +62,7 @@ public sealed class DebugCapturePackage : AsyncPackage
 
         this.logger = new OutputWindowLogger(this);
         await this.logger.InitializeAsync(cancellationToken);
+        OutputLogger = this.logger;
 
         var dte = await this.GetDteAsync(cancellationToken);
         if (dte is null)

@@ -10,10 +10,11 @@ namespace DebugCapture.Services;
 internal sealed class OutputWindowLogger : IOutputWindowLogger
 {
     private static readonly Guid PaneGuid = new("72f6bb9f-5a14-4072-a32a-20d91945a229");
-    private const string PaneTitle = "DebugCapture";
+    private const string PaneTitle = "Debug Capture";
 
     private readonly AsyncPackage package;
     private IVsOutputWindowPane? pane;
+    private bool initialized;
 
     public OutputWindowLogger(AsyncPackage package)
     {
@@ -22,6 +23,11 @@ internal sealed class OutputWindowLogger : IOutputWindowLogger
 
     public async Task InitializeAsync(CancellationToken cancellationToken)
     {
+        if (this.initialized && this.pane is not null)
+        {
+            return;
+        }
+
         await this.package.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
 
         var outputWindow = await this.package.GetServiceAsync(typeof(SVsOutputWindow)).ConfigureAwait(true) as IVsOutputWindow;
@@ -31,8 +37,10 @@ internal sealed class OutputWindowLogger : IOutputWindowLogger
         }
 
         var paneGuid = PaneGuid;
-        outputWindow.CreatePane(ref paneGuid, PaneTitle, fInitVisible: 0, fClearWithSolution: 0);
+        outputWindow.CreatePane(ref paneGuid, PaneTitle, fInitVisible: 1, fClearWithSolution: 0);
         outputWindow.GetPane(ref paneGuid, out this.pane);
+        this.pane?.Activate();
+        this.initialized = this.pane is not null;
     }
 
     public Task LogAsync(Exception exception, CancellationToken cancellationToken = default)
@@ -52,6 +60,7 @@ internal sealed class OutputWindowLogger : IOutputWindowLogger
             return;
         }
 
+        await this.InitializeAsync(cancellationToken).ConfigureAwait(false);
         await this.package.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
 
         this.pane?.OutputStringThreadSafe(FormatMessage(message));
